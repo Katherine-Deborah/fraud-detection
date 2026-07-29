@@ -4,7 +4,7 @@
 #   Session 2  -> kafka (KRaft mode, no Zookeeper)
 #   Session 3  -> redis
 #   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler  <- this session
-#   Session 5  -> mlflow
+#   Session 5  -> mlflow  <- this session
 #   Session 8  -> triton, fastapi gateway
 #   Session 9  -> prometheus, grafana
 
@@ -151,5 +151,32 @@ services:
       redis:
         condition: service_healthy
 
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.2
+    container_name: fraud-mlflow
+    # SQLite backend store (not Postgres): a single-node local demo doesn't
+    # need a second Postgres-backed service coupled to Airflow's -- this
+    # keeps MLflow's lifecycle independent, matching the project's pattern
+    # of adding only what each session needs. Both the backend DB and the
+    # artifact store live under one named volume so runs/artifacts survive
+    # `docker compose down`.
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   airflow-postgres-data:
+  mlflow-data:

@@ -31,3 +31,14 @@ feast[redis]==0.65.0
 # requirements-airflow.txt -- this is just for local iteration/testing of
 # the Great Expectations suite in validation/.)
 great_expectations==1.19.1
+
+# Session 5: local model training + MLflow tracking
+# Class imbalance handled via class weighting (not SMOTE) for all 4
+# models -- see docs/model_comparison.md for the per-model rationale --
+# so no imbalanced-learn dependency is needed.
+scikit-learn==1.4.2
+mlflow==2.12.2
+# torch: pinned to the CUDA 12.1 build already installed locally (GTX 1650
+# Ti). On a machine without that GPU/CUDA setup, install the CPU wheel
+# instead: `pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu`
+torch==2.5.1
