@@ -1,6 +1,6 @@
 # Fraud Detection Pipeline
 
-**Status: in progress — Session 0 (environment & repo scaffold) complete.**
+**Status: in progress — Sessions 0–1 complete (repo scaffold, synthetic dataset generation).**
 
 An end-to-end, portfolio-grade fraud detection system: streaming ingestion, a
 feature store, orchestrated training, cloud-based training (SageMaker), a

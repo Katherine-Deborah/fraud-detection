@@ -46,11 +46,11 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Prerequisites:** Session 0 complete.
 
 **Tasks:**
-- [ ] Write a data generator producing transaction records per the schema in PROJECT.md §5.1.
-- [ ] Inject realistic fraud patterns, not pure randomness (e.g., bursts of high-velocity transactions, geo-impossible sequences, new-device + high-amount combos) — a model trained on i.i.d. random noise won't produce meaningful precision/recall numbers.
-- [ ] Target 5M+ rows; make row count configurable so smaller runs are possible during development.
-- [ ] Write the raw dataset to local disk (parquet), documented in `docs/dataset.md` with the actual fraud rate achieved.
-- [ ] Note explicitly: this dataset is synthetic — say so in the README, don't imply it's real financial data.
+- [x] Write a data generator producing transaction records per the schema in PROJECT.md §5.1.
+- [x] Inject realistic fraud patterns, not pure randomness (e.g., bursts of high-velocity transactions, geo-impossible sequences, new-device + high-amount combos) — a model trained on i.i.d. random noise won't produce meaningful precision/recall numbers.
+- [x] Target 5M+ rows; make row count configurable so smaller runs are possible during development.
+- [x] Write the raw dataset to local disk (parquet), documented in `docs/dataset.md` with the actual fraud rate achieved.
+- [x] Note explicitly: this dataset is synthetic — say so in the README, don't imply it's real financial data.
 
 **Definition of done:** Running the generator script produces a parquet file with the documented schema and fraud rate; a notebook or script shows basic EDA (class balance, feature distributions).
 
@@ -59,7 +59,7 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Cost/safety check:** None.
 
 **Session log:**
-- _(fill in after running this session)_
+- 2026-07-28: Built `data_generation/generate_transactions.py` — fully vectorized (numpy/pandas, no per-row Python loops over the 5M-row population; only the ~10k injected fraud rows and account-level setup use small Python loops, which is negligible). Generates accounts with a home city, per-account spend multiplier, and overdispersed activity level, then base transactions via a repeat/uniform-timestamp approach followed by a sort per account (avoids needing an explicit Poisson-process loop). Injected 3 fraud patterns (velocity burst, geo-impossible sequence, new-device+high-amount) split ~40/30/30 of the fraud budget, merged into the base population *before* computing the 15 engineered features, so features emerge naturally rather than being hand-set. Ran the full default config (`--n-rows 5000000 --n-accounts 50000 --seed 42`): 5,010,000 rows, 0.1996% fraud rate, ~88s runtime, written to `data/raw/transactions.parquet` (gitignored, not committed — regenerate via the documented command). `data_generation/eda.py` prints class balance / per-feature fraud-vs-legitimate means / fraud rate by category, and saves 3 plots to `docs/eda/` (committed). Full methodology, schema, sentinel-value conventions (`-1` for "no prior transaction"), and measured signal strength are in `docs/dataset.md`. Verified no label leakage: no engineered feature reads `is_fraud`, all derived purely from timestamp/amount/device/category/location. One deviation from a literal read of the "10-15 features" spec: settled on 15 exactly, replacing two originally-planned rolling-time-window "distinct count in trailing Nd" features with cheaper *cumulative* distinct-count features (`cumulative_distinct_devices`, `cumulative_distinct_merchant_categories`) — same modeling intent (device/category novelty over time), avoids a much slower rolling-distinct-in-time-window pandas operation at 5M-row scale.
 
 ---
 
