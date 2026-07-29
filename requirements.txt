@@ -11,10 +11,17 @@ python-dotenv==1.0.1
 ruff==0.8.4
 
 # Session 1: synthetic dataset generation + EDA
-pandas==3.0.5
+# pandas pinned to <3 as of Session 3 -- feast==0.65.0 requires
+# `pandas<3,>=1.4.3`. Confirmed the Session 1 generator and EDA scripts
+# still run identically under 2.3.3 (regenerated the full 5M-row dataset,
+# same row count and fraud rate as the original 3.0.5 run).
+pandas==2.3.3
 numpy==2.4.6
 pyarrow==25.0.0
 matplotlib==3.11.1
 
 # Session 2: Kafka ingestion (producer/consumer)
 confluent-kafka==2.6.1
+
+# Session 3: Feature store (Feast + Redis)
+feast[redis]==0.65.0

@@ -292,9 +292,13 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     combined.to_parquet(args.out, index=False)
 
+    accounts_out = os.path.join(os.path.dirname(args.out), "accounts.parquet")
+    accounts[["account_id", "home_city", "home_lat", "home_lon"]].to_parquet(accounts_out, index=False)
+
     fraud_rate_actual = combined["is_fraud"].mean()
     elapsed = time.time() - t0
     print(f"Wrote {len(combined):,} rows to {args.out}")
+    print(f"Wrote {len(accounts):,} account home-location rows to {accounts_out}")
     print(f"Actual fraud rate: {fraud_rate_actual:.4%} ({combined['is_fraud'].sum():,} fraud rows)")
     print(f"Elapsed: {elapsed:.1f}s")
 

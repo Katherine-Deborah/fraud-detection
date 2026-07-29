@@ -1,14 +1,32 @@
 # Services are added incrementally, session by session, per SESSIONS.md.
 # Session 0: verified docker compose works locally with a hello-world stub.
 # Planned additions:
-#   Session 2  -> kafka (KRaft mode, no Zookeeper)               <- this session
-#   Session 3  -> redis
+#   Session 2  -> kafka (KRaft mode, no Zookeeper)
+#   Session 3  -> redis                                          <- this session
 #   Session 4  -> airflow-webserver, airflow-scheduler, postgres (metadata DB)
 #   Session 5  -> mlflow
 #   Session 8  -> triton, fastapi gateway
 #   Session 9  -> prometheus, grafana
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: fraud-redis
+    ports:
+      # Mapped to host port 6380, not the default 6379: this machine's WSL
+      # Ubuntu distro already runs its own unrelated redis-server on
+      # 127.0.0.1:6379 (predates this project), and WSL2's localhost-
+      # forwarding made Windows-side clients connect to *that* one instead
+      # of this container's, silently. Using 6380 avoids the collision
+      # entirely rather than depending on the other process being absent.
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   kafka:
     image: apache/kafka:3.9.0
     container_name: fraud-kafka

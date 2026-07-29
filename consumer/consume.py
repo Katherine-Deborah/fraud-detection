@@ -7,12 +7,20 @@ Error handling (documented in detail in docs/kafka.md):
   - Out-of-order timestamps (a transaction arriving with an earlier
     timestamp than one already seen for the same account) are logged and
     counted, not dropped — the raw record is still landed in the lake;
-    ordering is a concern for the feature-computation layer (Session 3+),
-    not for raw ingestion.
+    ordering is a concern for the feature-computation layer, not for raw
+    ingestion.
   - Consumer restarts resume from the last *committed* offset (manual
     commit, only after a record is durably written), giving at-least-once
     delivery. A crash between write and commit can reprocess a record on
     restart; downstream consumers should dedupe by transaction_id.
+
+Session 3 adds real-time feature computation: each valid record is run
+through feature_store/online_features.py (the same 15 engineered features
+as the offline generator, computed incrementally from Redis-backed
+per-account state) and pushed into the Feast online store. A failure to
+push a feature update is logged and counted but does not stop ingestion —
+the data lake write is the durability guarantee; a missed feature push is
+recoverable by re-running feature_store/materialize.py.
 """
 
 from __future__ import annotations
@@ -21,11 +29,21 @@ import argparse
 import json
 import logging
 import signal
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import pandas as pd
 from confluent_kafka import Consumer, KafkaException
+from feast import FeatureStore
+from feast.data_source import PushMode
+
+from feature_store.online_features import OnlineFeatureEngine
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [consumer] %(levelname)s %(message)s"
@@ -113,10 +131,17 @@ def validate(payload: bytes) -> tuple[dict | None, str | None]:
     return record, None
 
 
-def forward_to_feature_engineering(record: dict) -> None:
-    """Stub — Session 3 replaces this with a write into the Feast/Redis
-    online feature store. For now it's a documented no-op."""
-    pass
+def forward_to_feature_engineering(
+    record: dict, engine: OnlineFeatureEngine, store: FeatureStore
+) -> None:
+    """Computes the 15 engineered features for this transaction from
+    Redis-backed per-account state (see feature_store/online_features.py)
+    and pushes them into the Feast online store, keeping it consistent
+    with what training sees from the offline parquet (modulo the
+    documented geo-jitter tolerance)."""
+    features = engine.compute(record)
+    row = pd.DataFrame([features])
+    store.push("transactions_push_source", row, to=PushMode.ONLINE)
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,6 +162,22 @@ def parse_args() -> argparse.Namespace:
         default=15.0,
         help="Exit after this many seconds with no new messages (0 = run forever)",
     )
+    p.add_argument(
+        "--feature-repo",
+        default="feature_store/feature_repo",
+        help="Path to the Feast feature repo (see feature_store/feature_repo/feature_store.yaml)",
+    )
+    p.add_argument(
+        "--redis-host",
+        default="localhost",
+        help="Host for the online-feature-engine's Redis state (db=1) -- see feature_store/online_features.py",
+    )
+    p.add_argument("--redis-port", type=int, default=6380)
+    p.add_argument(
+        "--accounts-path",
+        default="data/raw/accounts.parquet",
+        help="Account home-location reference table (see data_generation/generate_transactions.py)",
+    )
     return p.parse_args()
 
 
@@ -145,6 +186,9 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     lake = DataLakeWriter(output_dir)
     dead_letter = DeadLetterWriter(output_dir)
+
+    feature_store = FeatureStore(repo_path=str(REPO_ROOT / args.feature_repo))
+    feature_engine = OnlineFeatureEngine(args.redis_host, args.redis_port, REPO_ROOT / args.accounts_path)
 
     consumer = Consumer(
         {
@@ -169,6 +213,7 @@ def main() -> None:
     valid_count = 0
     malformed_count = 0
     out_of_order_count = 0
+    feature_push_failures = 0
     last_message_time = time.monotonic()
 
     log.info(
@@ -215,26 +260,36 @@ def main() -> None:
             last_seen_ts[account_id] = max(prev_ts or record["timestamp"], record["timestamp"])
 
             lake.write(record)
-            forward_to_feature_engineering(record)
+            try:
+                forward_to_feature_engineering(record, feature_engine, feature_store)
+            except Exception:
+                # A feature-store hiccup shouldn't block raw ingestion --
+                # the lake write above already durably captured this
+                # record, and a missed push is recoverable by re-running
+                # feature_store/materialize.py. See module docstring.
+                feature_push_failures += 1
+                log.exception("Feature push failed for %s, continuing", record["transaction_id"])
             valid_count += 1
             consumer.commit(msg, asynchronous=False)
 
             if valid_count % 500 == 0:
                 log.info(
-                    "Landed %d valid records (%d malformed, %d out-of-order)",
+                    "Landed %d valid records (%d malformed, %d out-of-order, %d feature-push failures)",
                     valid_count,
                     malformed_count,
                     out_of_order_count,
+                    feature_push_failures,
                 )
     finally:
         consumer.close()
         lake.close()
         dead_letter.close()
         log.info(
-            "Final: %d valid records landed, %d dead-lettered, %d out-of-order timestamps observed",
+            "Final: %d valid records landed, %d dead-lettered, %d out-of-order timestamps, %d feature-push failures",
             valid_count,
             malformed_count,
             out_of_order_count,
+            feature_push_failures,
         )
 
 

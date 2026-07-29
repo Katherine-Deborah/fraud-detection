@@ -58,3 +58,6 @@ infra/**/*.tfvars
 
 # Kubernetes local state
 k8s/**/*.local.yaml
+
+# Feast (regenerate via `feast apply` -- see feature_store/feature_repo/)
+feature_store/feature_repo/registry.db

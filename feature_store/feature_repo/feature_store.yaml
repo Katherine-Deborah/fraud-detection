@@ -1,0 +1,14 @@
+project: fraud_detection
+provider: local
+registry:
+  path: registry.db
+  cache_ttl_seconds: 600
+online_store:
+  type: redis
+  # Port 6380, not 6379 -- see the comment in docker-compose.yml's redis
+  # service: 6379 collides with an unrelated pre-existing redis-server
+  # inside this machine's WSL Ubuntu distro.
+  connection_string: "localhost:6380"
+offline_store:
+  type: file
+entity_key_serialization_version: 3
