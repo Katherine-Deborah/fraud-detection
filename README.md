@@ -1,6 +1,6 @@
 # Fraud Detection Pipeline
 
-**Status: in progress — Sessions 0–1 complete (repo scaffold, synthetic dataset generation).**
+**Status: in progress — Sessions 0–2 complete (repo scaffold, synthetic dataset generation, Kafka ingestion).**
 
 An end-to-end, portfolio-grade fraud detection system: streaming ingestion, a
 feature store, orchestrated training, cloud-based training (SageMaker), a
@@ -45,7 +45,18 @@ Forest, Isolation Forest (unsupervised), and an LSTM (sequence-based).
 ## Quickstart
 
 Services are added to `docker-compose.yml` incrementally as each session
-implements them — there is nothing to run yet. Once the stack is complete:
+implements them.
+
+```bash
+docker compose up -d kafka          # single-node Kafka, KRaft mode
+python consumer/consume.py          # writes valid records to data/lake/
+python producer/produce.py --limit 5000 --rate 200   # replays the dataset
+```
+
+See [`docs/kafka.md`](docs/kafka.md) for the message schema, offset/replay
+strategy, and error-handling behavior (malformed messages, out-of-order
+timestamps, consumer restarts). The rest of the stack comes online in later
+sessions:
 
 ```bash
 docker compose up

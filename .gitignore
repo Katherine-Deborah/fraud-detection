@@ -30,6 +30,9 @@ aws_credentials
 .idea/
 *.swp
 
+# Claude Code local session state
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

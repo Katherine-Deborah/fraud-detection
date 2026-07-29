@@ -70,10 +70,10 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Prerequisites:** Session 1 complete (need data to stream).
 
 **Tasks:**
-- [ ] Add Kafka + Zookeeper (or KRaft mode) to `docker-compose.yml`.
-- [ ] Producer: replays the synthetic dataset as a live stream at a configurable rate (transactions/sec), serialized as Avro or JSON with a documented schema.
-- [ ] Consumer: reads from the topic, writes raw events to a local "data lake" path, and (stub for now) forwards records toward the feature engineering step.
-- [ ] Add basic error handling: what happens on a malformed message, a consumer restart, an out-of-order timestamp.
+- [x] Add Kafka + Zookeeper (or KRaft mode) to `docker-compose.yml`.
+- [x] Producer: replays the synthetic dataset as a live stream at a configurable rate (transactions/sec), serialized as Avro or JSON with a documented schema.
+- [x] Consumer: reads from the topic, writes raw events to a local "data lake" path, and (stub for now) forwards records toward the feature engineering step.
+- [x] Add basic error handling: what happens on a malformed message, a consumer restart, an out-of-order timestamp.
 
 **Definition of done:** `docker compose up` starts Kafka; running the producer and consumer scripts shows messages flowing end-to-end, verified by counting records landing in the data lake path.
 
@@ -82,7 +82,7 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Cost/safety check:** None — local only.
 
 **Session log:**
-- _(fill in after running this session)_
+- 2026-07-29: Replaced the `hello-world` stub with a single-node Kafka broker in **KRaft mode** (`apache/kafka:3.9.0`, no Zookeeper) — chosen over Zookeeper since Kafka's own quorum controller is the direction the ecosystem has moved and it's one fewer container for a single-node local setup. Hit one real snag getting it to start: `KAFKA_LISTENERS` with an explicit `0.0.0.0` host made the KRaft storage-formatting step reject `advertised.listeners` with "nonroutable meta-address 0.0.0.0" even though `KAFKA_ADVERTISED_LISTENERS` itself was set to `localhost` — switching the bind host in `KAFKA_LISTENERS` to blank (`PLAINTEXT://:9092`) fixed it, matching Apache's own example config. Confirmed healthy via `docker exec ... kafka-topics.sh --list`. Serialization: asked the user Avro-vs-JSON (Avro needs a Schema Registry container); JSON was chosen to keep this session's infra surface small — schema is documented and validated in code instead of via a registry. Built `producer/produce.py` (reads `data/raw/transactions.parquet`, replays only the 8 raw fields — not the 15 offline-computed engineered features, since a real producer wouldn't have full account history — sorted chronologically, keyed by `account_id` for per-account partition ordering, configurable `--rate`/`--limit`, and a `--inject-malformed-every` flag to deliberately corrupt messages for testing) and `consumer/consume.py` (manual offset commit only after a durable write — at-least-once — writes valid records to date-partitioned JSONL under `data/lake/`, dead-letters malformed messages to `data/lake/_dead_letter/dead_letter.jsonl` with the raw bytes and error, detects and logs out-of-order per-account timestamps without dropping the record, and calls a documented no-op `forward_to_feature_engineering()` stub for Session 3 to fill in). End-to-end verified live against the real Kafka container: replayed 2000 rows with malformed messages injected every 250th message → 1992 landed in the lake, 8 correctly dead-lettered; restarted the consumer with the same group-id after producing 50 more messages and confirmed it resumed from the committed offset (only the new 50 landed, not a re-read of the earlier 1992); hand-crafted two same-account messages with a decreasing timestamp and confirmed the consumer logs the out-of-order warning but still lands the record rather than dropping it. Offset/replay strategy (`earliest` on first use of a consumer group, manual commit for at-least-once, documented reset procedure for forcing a full replay) is written up in `docs/kafka.md` along with the full message schema and error-handling table — read that file before Session 3 rather than re-deriving the schema. Added `confluent-kafka==2.6.1` to `requirements.txt` (prebuilt Windows wheel installs cleanly, no build tools needed). No deviations from the plan otherwise; `docker compose down` was run at the end of the session (no persistent volume, so broker state is ephemeral by design — noted in `docs/kafka.md`).
 
 ---
 

@@ -15,3 +15,6 @@ pandas==3.0.5
 numpy==2.4.6
 pyarrow==25.0.0
 matplotlib==3.11.1
+
+# Session 2: Kafka ingestion (producer/consumer)
+confluent-kafka==2.6.1
