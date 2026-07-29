@@ -1,0 +1,11 @@
+# Dependencies for the Airflow image (Dockerfile.airflow), on top of
+# whatever apache/airflow:<tag> already pins. Kept separate from the
+# project's own requirements.txt (which targets host-venv scripts) because
+# Feast and Great Expectations may or may not resolve cleanly against
+# Airflow's own constraints -- see docs/orchestration.md for what actually
+# happened when this was tried.
+pandas==2.3.3
+numpy==2.4.6
+pyarrow==25.0.0
+feast[redis]==0.65.0
+great_expectations==1.19.1

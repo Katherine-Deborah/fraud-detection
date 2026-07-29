@@ -25,3 +25,9 @@ confluent-kafka==2.6.1
 
 # Session 3: Feature store (Feast + Redis)
 feast[redis]==0.65.0
+
+# Session 4: Airflow orchestration + data validation
+# (Airflow itself runs in its own container -- see Dockerfile.airflow /
+# requirements-airflow.txt -- this is just for local iteration/testing of
+# the Great Expectations suite in validation/.)
+great_expectations==1.19.1

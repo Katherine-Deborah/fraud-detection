@@ -1,0 +1,8 @@
+# Custom Airflow image for Session 4: adds the project's own data/ML
+# dependencies (pandas, Feast, Great Expectations) on top of the official
+# image so DAG tasks can import data_generation/ and feature_store/
+# directly, the same code paths already used and tested outside Airflow.
+FROM apache/airflow:2.10.4-python3.11
+
+COPY requirements-airflow.txt /requirements-airflow.txt
+RUN pip install --no-cache-dir -r /requirements-airflow.txt

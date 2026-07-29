@@ -2,11 +2,43 @@
 # Session 0: verified docker compose works locally with a hello-world stub.
 # Planned additions:
 #   Session 2  -> kafka (KRaft mode, no Zookeeper)
-#   Session 3  -> redis                                          <- this session
-#   Session 4  -> airflow-webserver, airflow-scheduler, postgres (metadata DB)
+#   Session 3  -> redis
+#   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler  <- this session
 #   Session 5  -> mlflow
 #   Session 8  -> triton, fastapi gateway
 #   Session 9  -> prometheus, grafana
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env, see .env.example}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:?set AIRFLOW_WEBSERVER_SECRET_KEY in .env, see .env.example}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    # Read by dags/fraud_pipeline_dag.py to find the mounted project code,
+    # and by feature_store/store_utils.py to reach Redis via the compose
+    # network's service name instead of the host-only localhost:6380
+    # (see that file's docstring for why the two must differ).
+    PROJECT_ROOT: /opt/airflow/project
+    PYTHONPATH: /opt/airflow/project
+    FEAST_REDIS_CONNECTION_STRING: redis:6379
+  volumes:
+    &airflow-common-volumes
+    - ./dags:/opt/airflow/dags
+    - ./validation:/opt/airflow/project/validation
+    - ./data_generation:/opt/airflow/project/data_generation
+    - ./feature_store:/opt/airflow/project/feature_store
+    - ./data:/opt/airflow/project/data
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
 
 services:
   redis:
@@ -53,3 +85,71 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fraud-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      # Unlike Kafka/Redis, this is *not* meant to be ephemeral -- DAG run
+      # history should survive a `docker compose down` between demo runs.
+      - airflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: fraud-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname Airflow \
+          --lastname Admin \
+          --role Admin \
+          --email admin@example.com || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: fraud-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: fraud-airflow-scheduler
+    command: scheduler
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  airflow-postgres-data:
