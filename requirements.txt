@@ -1,0 +1,11 @@
+# Fraud Detection Pipeline — dependencies
+#
+# Pinned incrementally, session by session (mirrors docker-compose.yml).
+# Session 0: base dev tooling only. Session-specific libs (pandas/pyarrow,
+# kafka-python, feast, apache-airflow, mlflow, torch, fastapi, etc.) are
+# added in the session that first needs them, not all at once up front.
+
+# Dev tooling
+pytest==8.3.4
+python-dotenv==1.0.1
+ruff==0.8.4

@@ -1,0 +1,14 @@
+# Services are added incrementally, session by session, per SESSIONS.md.
+# Session 0: verifies docker compose works locally; no real services yet.
+# Planned additions:
+#   Session 2  -> kafka, zookeeper (or KRaft)
+#   Session 3  -> redis
+#   Session 4  -> airflow-webserver, airflow-scheduler, postgres (metadata DB)
+#   Session 5  -> mlflow
+#   Session 8  -> triton, fastapi gateway
+#   Session 9  -> prometheus, grafana
+
+services:
+  scaffold-check:
+    image: hello-world
+
