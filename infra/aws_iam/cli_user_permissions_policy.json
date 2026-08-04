@@ -6,11 +6,10 @@
       "Effect": "Allow",
       "Action": [
         "s3:CreateBucket",
-        "s3:HeadBucket",
         "s3:ListBucket",
         "s3:GetBucketLocation",
-        "s3:PutBucketLifecycleConfiguration",
-        "s3:GetBucketLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
         "s3:PutObject",
         "s3:GetObject",
         "s3:DeleteObject"

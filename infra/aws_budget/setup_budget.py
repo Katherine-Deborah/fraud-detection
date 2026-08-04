@@ -1,6 +1,8 @@
 """Create the AWS Budget alert required by PROJECT.md §7 rule 1, before any
-SageMaker resource is touched. Idempotent -- safe to rerun (updates the
-existing budget instead of erroring if it already exists).
+SageMaker resource is touched. Idempotent -- safe to rerun (deletes and
+recreates the existing budget instead of erroring if it already exists;
+Budgets' UpdateBudget API can't change notification subscribers, so a
+plain update would silently keep alerts pointed at a stale email/limit).
 
 Usage:
     python infra/aws_budget/setup_budget.py --email you@example.com --limit 10
@@ -62,9 +64,11 @@ def main() -> None:
         )
         print(f"created budget '{args.budget_name}': ${args.limit:.2f}/month, alerts to {args.email}")
     except budgets.exceptions.DuplicateRecordException:
-        budgets.update_budget(AccountId=account_id, NewBudget=budget)
-        print(f"budget '{args.budget_name}' already existed -- limit updated to ${args.limit:.2f}/month")
-        print("(notification thresholds are not modified on update; delete and rerun if you need to change those)")
+        budgets.delete_budget(AccountId=account_id, BudgetName=args.budget_name)
+        budgets.create_budget(
+            AccountId=account_id, Budget=budget, NotificationsWithSubscribers=notifications
+        )
+        print(f"budget '{args.budget_name}' already existed -- recreated: ${args.limit:.2f}/month, alerts to {args.email}")
 
     print("\nverify in the console: https://console.aws.amazon.com/billing/home#/budgets")
 
