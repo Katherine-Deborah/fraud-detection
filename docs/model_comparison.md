@@ -60,7 +60,16 @@ models on this labeled dataset.
   (~1M row) subsample used here (a deliberate local-GPU scale tradeoff,
   documented in `training/train_lstm.py`) -- likely via SageMaker in
   Session 6, which is exactly the kind of workload a managed training job
-  is for.
+  is for. **Status (2026-08-04): explicitly deferred, not dropped.**
+  Random Forest was trained via SageMaker and registered in Session 6
+  instead, chosen mainly for engineering-lift reasons (script-mode
+  `SKLearn` container vs. a custom PyTorch container + sequence-windowing
+  logic), not because it's unconditionally better -- RF wins on AUC-PR
+  (0.6554 vs 0.6413) but LSTM wins on test recall (88.1% vs 86.3%), the
+  more fraud-relevant number. Offered to launch the full-scale LSTM
+  SageMaker job in the same session; deferred at the user's request
+  ("it is okay for now"). Revisit before treating Random Forest as the
+  final production model choice.
 - An explicit padding mask for the LSTM's left-padded short sequences,
   instead of relying on the network to learn to ignore normalized-zero
   padding steps.
