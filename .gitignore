@@ -6,6 +6,7 @@ __pycache__/
 .eggs/
 .venv/
 .venv-sagemaker/
+.venv-registry/
 venv/
 env/
 .mypy_cache/
