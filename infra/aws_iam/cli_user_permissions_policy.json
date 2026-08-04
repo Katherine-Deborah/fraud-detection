@@ -1,0 +1,76 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3TrainingBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:HeadBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutBucketLifecycleConfiguration",
+        "s3:GetBucketLifecycleConfiguration",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::fraud-detection-sagemaker-*",
+        "arn:aws:s3:::fraud-detection-sagemaker-*/*"
+      ]
+    },
+    {
+      "Sid": "SageMakerTrainingJobs",
+      "Effect": "Allow",
+      "Action": [
+        "sagemaker:CreateTrainingJob",
+        "sagemaker:DescribeTrainingJob",
+        "sagemaker:StopTrainingJob",
+        "sagemaker:ListTrainingJobs",
+        "sagemaker:AddTags",
+        "sagemaker:ListEndpoints",
+        "sagemaker:DescribeEndpoint",
+        "sagemaker:DeleteEndpoint",
+        "sagemaker:ListNotebookInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PassExecutionRoleToSageMakerOnly",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::*:role/fraud-detection-sagemaker-execution",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": "sagemaker.amazonaws.com" }
+      }
+    },
+    {
+      "Sid": "ReadTrainingJobLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:log-group:/aws/sagemaker/TrainingJobs:*"
+    },
+    {
+      "Sid": "BudgetAlert",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:CreateBudget",
+        "budgets:ModifyBudget",
+        "budgets:DescribeBudgetNotificationsForAccount"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SelfAccountId",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    }
+  ]
+}

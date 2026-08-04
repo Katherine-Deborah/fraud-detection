@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 .eggs/
 .venv/
+.venv-sagemaker/
 venv/
 env/
 .mypy_cache/

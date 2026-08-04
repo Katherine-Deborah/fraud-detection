@@ -42,3 +42,12 @@ mlflow==2.12.2
 # Ti). On a machine without that GPU/CUDA setup, install the CPU wheel
 # instead: `pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu`
 torch==2.5.1
+
+# Session 6: SageMaker training job (boto3 + sagemaker SDK)
+# NOT listed here -- see requirements-sagemaker.txt and its header comment
+# for why: sagemaker==2.232.2 and mlflow==2.12.2 both hard-pin numpy<2 /
+# pyarrow<16, which directly conflicts with feast's numpy>=2.0/pyarrow>=16.1
+# requirement above. Installing them into this venv downgrades numpy/pyarrow
+# and silently breaks feast (confirmed via pip's own resolver warning).
+# Same class of problem as Dockerfile.airflow in Session 4 -- isolate
+# instead of fighting the resolver.
