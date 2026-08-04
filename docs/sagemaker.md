@@ -1,9 +1,13 @@
 # Session 6 — SageMaker training job
 
-**Status as of this write-up: code written and locally smoke-tested; the
-live AWS steps (account confirmed, everything after it) have not been run
-yet.** This doc is both the design record and the runbook to finish the
-session. Read PROJECT.md §7 (cost rules) before doing anything below.
+**Status as of this write-up: account created, IAM configured, budget
+alert live, training data uploaded to S3. The training job launch itself
+is blocked on an AWS Service Quota increase for `ml.m5.large` for training
+job usage** (new accounts default to a quota of 0 for SageMaker training
+instances) **— request submitted 2026-08-03, pending AWS approval.**
+Nothing else in the runbook can proceed until that's granted. This doc is
+both the design record and the runbook to finish the session. Read
+PROJECT.md §7 (cost rules) before doing anything below.
 
 ## What's already done (no AWS touched)
 
@@ -82,18 +86,38 @@ warning in `.venv-sagemaker` (a transitive pin from `sagemaker-mlflow`,
 which this project doesn't use) — cosmetic only, imports and the smoke
 test both work.
 
+## Bugs found during live testing (2026-08-03)
+
+Two more real bugs surfaced once actual AWS calls were being made, not
+just syntax/import checks — both fixed in the same live-testing pass:
+
+- **IAM policy had non-existent action names.** The original
+  `cli_user_permissions_policy.json` granted
+  `s3:PutBucketLifecycleConfiguration` / `s3:GetBucketLifecycleConfiguration`
+  — these aren't real IAM actions. S3's lifecycle-config API operations map
+  to `s3:PutLifecycleConfiguration` / `s3:GetLifecycleConfiguration` (no
+  "Bucket" in the name), caught via a real `AccessDenied` error while
+  `sagemaker_upload_data.py` tried to attach the 14-day lifecycle rule.
+  Also dropped `s3:HeadBucket`, which isn't a distinct IAM action —
+  `HeadBucket` calls are actually authorized by `s3:ListBucket`, already
+  granted separately. Fixed; re-ran the upload successfully.
+- **`setup_budget.py`'s rerun path silently didn't update the alert
+  email.** `budgets:UpdateBudget` can't change notification subscribers,
+  so rerunning the script with a corrected email left alerts pointed at
+  the old address with no error. Changed the idempotent path to delete and
+  recreate the budget on rerun instead of updating in place.
+
 ## Runbook — what's left, in order
 
-### 1. AWS account
-Confirmed done — account created.
+### 1. AWS account — done
+Account created.
 
-### 2. IAM setup
-Follow `infra/aws_iam/README.md`: create the scoped CLI user (attach
-`cli_user_permissions_policy.json`) and the SageMaker execution role
-(trust + permissions policies in the same folder). Save the CLI user's
-access key ID/secret and the execution role's ARN — you'll need both next.
+### 2. IAM setup — done
+Followed `infra/aws_iam/README.md`: scoped CLI user + SageMaker execution
+role both created, access key ID/secret and the execution role's ARN
+saved.
 
-### 3. Install & configure AWS CLI
+### 3. Install & configure AWS CLI — done
 ```
 # Windows: winget install Amazon.AWSCLI  (or the MSI from AWS's site)
 aws configure
@@ -101,20 +125,22 @@ aws configure
 aws sts get-caller-identity   # confirms it's the scoped user, not root
 ```
 
-### 4. Budget alert (mandatory before step 5, per PROJECT.md §7 rule 1)
+### 4. Budget alert — done (mandatory before step 5, per PROJECT.md §7 rule 1)
 ```
 .venv-sagemaker/Scripts/python infra/aws_budget/setup_budget.py --email <your-email> --limit 10
 ```
-Verify in the console: Billing → Budgets.
+Verified in the console: Billing → Budgets. Hit and fixed a real bug here
+during live testing — see "Bugs found during live testing" below.
 
-### 5. Upload training data
+### 5. Upload training data — done
 ```
 .venv-sagemaker/Scripts/python training/sagemaker_upload_data.py --bucket fraud-detection-sagemaker-<your-account-id>
 ```
 (Bucket name must start with `fraud-detection-sagemaker-` — the IAM
 policies in step 2 are scoped to that prefix.) Note the printed S3 URI.
+Also hit and fixed a real IAM bug here — see below.
 
-### 6. Launch the training job
+### 6. Launch the training job — BLOCKED on AWS quota approval
 ```
 .venv-sagemaker/Scripts/python training/sagemaker_launch.py \
   --role-arn arn:aws:iam::<account-id>:role/fraud-detection-sagemaker-execution \
@@ -125,6 +151,29 @@ model S3 URI when done. Expect several minutes (container pull + ~10 min
 of training at full `n_estimators=200` on the full 3.5M-row training
 split, similar to Session 5's local 614.6s run) plus spot-instance
 queueing time, which can vary.
+
+**Currently blocked:** launching returns `ResourceLimitExceeded` — new AWS
+accounts default to a **`ml.m5.large` for training job usage** quota of 0.
+A Service Quota increase request was submitted 2026-08-03 via the Service
+Quotas console (SageMaker → training job usage) and is pending AWS
+approval; there's no way to train on managed SageMaker until it's granted.
+Nothing to do here but wait and re-run step 6 once the request is
+approved — the launch script itself (after the bucket/region fix below) is
+believed ready to go.
+
+**Uncommitted fix in `training/sagemaker_launch.py`, made while chasing
+this down, not yet the actual quota problem but two real bugs surfaced on
+the way to it:** the SageMaker SDK defaults to staging code and model
+output in an auto-named `sagemaker-<region>-<account-id>` bucket that our
+IAM policy correctly doesn't grant access to (scoped to
+`fraud-detection-sagemaker-*` only) — fixed by deriving `code_location`
+and `output_path` from the same bucket passed via `--s3-input-uri`. Also
+found the boto3 session was resolving to `us-west-2` (the CLI's configured
+default region) while the data bucket actually lives in `us-east-1` (from
+`sagemaker_upload_data.py`'s own default) — the `SKLearn` estimator has no
+standalone `--region` flag, so this now threads a `boto3.Session` with the
+explicit `--region` argument through a `sagemaker.session.Session`. Worth
+committing alongside this doc update.
 
 ### 7. Register the artifact in MLflow
 Bring up the local stack first if it's not already running

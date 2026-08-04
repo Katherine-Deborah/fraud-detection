@@ -25,7 +25,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from urllib.parse import urlparse
 
+import boto3
+from sagemaker.session import Session
 from sagemaker.sklearn.estimator import SKLearn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +48,22 @@ def main() -> None:
     parser.add_argument("--no-wait", dest="wait", action="store_false", default=True)
     args = parser.parse_args()
 
+    # The SageMaker SDK stages the source_dir code bundle (and, unless told
+    # otherwise, model output too) in an S3 "default bucket" it auto-names
+    # sagemaker-<region>-<account-id> and tries to create on the fly if
+    # missing -- a bucket our IAM policy correctly doesn't grant access to,
+    # since it's scoped to fraud-detection-sagemaker-* only. Pointing
+    # code_location/output_path at our own bucket avoids that call entirely.
+    # Also explicitly pin the region a boto3 Session resolves to: the CLI's
+    # configured default region can differ from where the data bucket
+    # actually lives (it did here -- ~/.aws/config default was us-west-2,
+    # but sagemaker_upload_data.py's own default put the bucket in
+    # us-east-1), and the SKLearn estimator has no standalone --region knob
+    # of its own, so this has to be threaded through explicitly.
+    parsed = urlparse(args.s3_input_uri)
+    bucket = parsed.netloc
+    sagemaker_session = Session(boto_session=boto3.Session(region_name=args.region))
+
     estimator = SKLearn(
         entry_point="sagemaker_entry.py",
         source_dir=str(REPO_ROOT / "training"),
@@ -63,6 +82,9 @@ def main() -> None:
         use_spot_instances=args.use_spot,
         max_run=1800,
         max_wait=3600 if args.use_spot else None,
+        sagemaker_session=sagemaker_session,
+        code_location=f"s3://{bucket}/code",
+        output_path=f"s3://{bucket}/output",
     )
 
     print(f"launching training job on {args.instance_type} (spot={args.use_spot}) ...")
