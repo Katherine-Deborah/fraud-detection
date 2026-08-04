@@ -1,13 +1,39 @@
 # Session 6 — SageMaker training job
 
-**Status as of this write-up: account created, IAM configured, budget
-alert live, training data uploaded to S3. The training job launch itself
-is blocked on an AWS Service Quota increase for `ml.m5.large` for training
-job usage** (new accounts default to a quota of 0 for SageMaker training
-instances) **— request submitted 2026-08-03, pending AWS approval.**
-Nothing else in the runbook can proceed until that's granted. This doc is
-both the design record and the runbook to finish the session. Read
-PROJECT.md §7 (cost rules) before doing anything below.
+**Status: complete.** A Random Forest model was trained as a managed
+SageMaker Training Job and registered into the local MLflow registry
+tagged `trained_via=sagemaker`, matching Session 5's local Random Forest
+result closely (AUC-PR 0.655 vs. 0.655, recall 86.3% vs. 86.3% — see
+"Final result" below). This doc is the design record and the record of
+everything hit getting there; read PROJECT.md §7 (cost rules) if revisiting
+this pattern for a future session.
+
+## Final result (2026-08-04)
+
+- **Job:** `fraud-rf-sagemaker-2026-08-04-18-33-43-040`, on-demand
+  `ml.m5.large`, region **`ap-southeast-2` (Sydney)** — not `us-east-1`,
+  see "Region mismatches" below for why.
+- **Billable time:** 1,684 seconds (~28 min, vs. Session 5's local 614.6s
+  — `ml.m5.large` has only 2 vCPUs, materially less parallelism than the
+  local dev machine for `RandomForestClassifier`'s `n_jobs`).
+- **Metrics:** AUC-PR 0.6554, recall 0.8628 @ threshold 0.373 (val FPR
+  0.0199 against the 2% target) — consistent with Session 5's local run
+  (0.655 / 86.3%) to 3 decimal places, a good end-to-end correctness
+  signal that script-mode training reproduces the local result.
+- **Registered:** MLflow run `random_forest_sagemaker`
+  (`http://localhost:5000`, experiment id 1), tagged
+  `trained_via=sagemaker` + `sagemaker_job_name`, alongside the 4 Session 5
+  local runs.
+- **AWS spend:** ~$0.07 for the training job (1,684 billable seconds ×
+  an estimated ~$0.145/hr on-demand `ml.m5.large` rate in `ap-southeast-2`
+  — not independently verified against Cost Explorer, since the scoped CLI
+  user intentionally has no billing-read permissions; check the console
+  for the authoritative number). Plus negligible S3 storage for the
+  326 MB training parquet, uploaded to **two** buckets due to the region
+  mismatch below — both already have the 14-day lifecycle rule and expire
+  automatically (`fraud-detection-sagemaker-183079729790` in `us-east-1`
+  on 2026-08-17; `fraud-detection-sagemaker-183079729790-syd` in
+  `ap-southeast-2` on 2026-08-18).
 
 ## What's already done (no AWS touched)
 
@@ -81,10 +107,11 @@ requirements.txt` in `.venv` first and expect the same
 numpy/pyarrow-vs-mlflow tension described above if you ever add
 `sagemaker`/`boto3` there directly — don't.
 
-There's also a harmless `mlflow` vs `mlflow-skinny` version-mismatch
-warning in `.venv-sagemaker` (a transitive pin from `sagemaker-mlflow`,
-which this project doesn't use) — cosmetic only, imports and the smoke
-test both work.
+There's also an `mlflow` vs `mlflow-skinny` version-mismatch warning in
+`.venv-sagemaker` (a transitive pin from `sagemaker-mlflow`, which this
+project doesn't use) — **this was originally logged here as "cosmetic
+only," which turned out to be wrong; see "Bugs found registering the
+artifact" below.**
 
 ## Bugs found during live testing (2026-08-03)
 
@@ -106,6 +133,62 @@ just syntax/import checks — both fixed in the same live-testing pass:
   so rerunning the script with a corrected email left alerts pointed at
   the old address with no error. Changed the idempotent path to delete and
   recreate the budget on rerun instead of updating in place.
+
+## Bugs found launching the job (2026-08-04)
+
+- **Spot and on-demand training quotas are separate.** The Service Quota
+  increase approved ahead of this session was for `ml.m5.large for
+  training job usage` (on-demand). `sagemaker_launch.py` defaults to
+  `use_spot_instances=True`, which draws against a *different* quota —
+  `ml.m5.large for spot training job usage` — still 0. First launch
+  attempt failed with `ResourceLimitExceeded` on the spot quota; retried
+  with `--no-spot` and got a second, more surprising `ResourceLimitExceeded`
+  on the on-demand quota that was supposedly just approved — see next bug.
+- **The quota was approved in the wrong region.** AWS Service Quotas are
+  per-region. The approval email specified **Asia Pacific (Sydney) /
+  `ap-southeast-2`** — not `us-east-1`, where the training bucket and all
+  prior testing lived, and not `us-west-2` (the CLI's configured default
+  region either, for that matter). The scoped CLI user has no
+  `servicequotas:*` permissions (by design — not needed for day-to-day
+  runs), so this couldn't be queried directly; confirmed by reading the
+  approval notification text. Fix: re-ran `sagemaker_upload_data.py`
+  against a **second** bucket, `fraud-detection-sagemaker-183079729790-syd`,
+  in `ap-southeast-2`, and launched there instead — see "Region
+  mismatches" note. **Takeaway for next time:** always request quota
+  increases in the same region you intend to actually use, and confirm the
+  approval email's region line before assuming a quota applies where you
+  think it does.
+- **`framework_version="1.2-1"` was not actually behavior-compatible with
+  local `scikit-learn==1.4.2`, despite this doc previously saying it was
+  (see the now-corrected "Framework version note" below).** `joblib.load`
+  of the SageMaker-trained `model.joblib` failed with `ValueError: node
+  array from the pickle has an incompatible dtype` — scikit-learn 1.3
+  added a `missing_go_to_left` field to the internal tree-node C struct
+  (to support missing-value splits), which changes the pickle layout for
+  every tree-based estimator, `RandomForestClassifier` included. Fixed by
+  pinning `.venv-sagemaker`'s scikit-learn to `1.2.1` (exact match to the
+  container's `1.2-1` framework version) — **`requirements-sagemaker.txt`
+  needs the same pin, not yet updated in that file as of this write-up.**
+- **The "cosmetic" `mlflow`/`mlflow-skinny` mismatch from Session 6 part 1
+  was not actually cosmetic.** `.venv-sagemaker` had `mlflow==2.12.2` but
+  `mlflow-skinny==3.15.1` (a stray transitive pull, likely via
+  `sagemaker`'s own `sagemaker-mlflow` extra). The *effective* runtime
+  behavior followed the newer skinny package, so `mlflow.sklearn.log_model`
+  called MLflow 3.x's `/api/2.0/mlflow/logged-models` endpoint, which the
+  `ghcr.io/mlflow/mlflow:v2.12.2` tracking server (docker-compose, Session
+  5) doesn't have — `404 Not Found`, only surfaced once an actual
+  `log_model` call was made against a live server, not on import. Fixed by
+  `pip install --force-reinstall mlflow==2.12.2 mlflow-skinny==2.12.2`
+  together. That reinstall's dependency resolution then silently pulled
+  scikit-learn back up to `1.9.0` (no version pin on scikit-learn from
+  either mlflow package), re-breaking the pickle-compatibility fix above —
+  had to re-pin `scikit-learn==1.2.1` a second time, *after* the mlflow
+  reinstall, for both fixes to hold simultaneously. **Order matters here:
+  install mlflow/mlflow-skinny first, scikit-learn last**, if rebuilding
+  this venv from scratch. `requirements-sagemaker.txt` should pin
+  `mlflow-skinny==2.12.2` explicitly alongside `mlflow==2.12.2` and
+  `scikit-learn==1.2.1` to make this reproducible — **not yet done as of
+  this write-up, do this before the next SageMaker session.**
 
 ## Runbook — what's left, in order
 
@@ -140,62 +223,58 @@ during live testing — see "Bugs found during live testing" below.
 policies in step 2 are scoped to that prefix.) Note the printed S3 URI.
 Also hit and fixed a real IAM bug here — see below.
 
-### 6. Launch the training job — BLOCKED on AWS quota approval
+### 6. Launch the training job — done
 ```
 .venv-sagemaker/Scripts/python training/sagemaker_launch.py \
-  --role-arn arn:aws:iam::<account-id>:role/fraud-detection-sagemaker-execution \
-  --s3-input-uri s3://fraud-detection-sagemaker-<account-id>/training-data/rf-session6/
+  --role-arn arn:aws:iam::183079729790:role/fraud-detection-sagemaker-execution \
+  --s3-input-uri s3://fraud-detection-sagemaker-183079729790-syd/training-data/rf-session6/ \
+  --region ap-southeast-2 --no-spot
 ```
-Runs in the foreground (`wait=True` by default) and prints the job name +
-model S3 URI when done. Expect several minutes (container pull + ~10 min
-of training at full `n_estimators=200` on the full 3.5M-row training
-split, similar to Session 5's local 614.6s run) plus spot-instance
-queueing time, which can vary.
+Note this is **not** the command shown in the script's own docstring —
+`--region ap-southeast-2` (to match where the quota was actually approved)
+and `--no-spot` (the spot quota is separate and still 0) are both required
+overrides. See "Bugs found launching the job" above for the full story;
+`training/sagemaker_launch.py`'s `code_location`/`output_path`/region
+fix from the earlier blocked attempt is committed and part of why this
+worked. Took ~28 minutes billable (1,684s) — longer than the ~10 min
+estimate in this doc's earlier draft, since `ml.m5.large`'s 2 vCPUs give
+`RandomForestClassifier` much less parallelism than the local dev machine.
 
-**Currently blocked:** launching returns `ResourceLimitExceeded` — new AWS
-accounts default to a **`ml.m5.large` for training job usage** quota of 0.
-A Service Quota increase request was submitted 2026-08-03 via the Service
-Quotas console (SageMaker → training job usage) and is pending AWS
-approval; there's no way to train on managed SageMaker until it's granted.
-Nothing to do here but wait and re-run step 6 once the request is
-approved — the launch script itself (after the bucket/region fix below) is
-believed ready to go.
-
-**Uncommitted fix in `training/sagemaker_launch.py`, made while chasing
-this down, not yet the actual quota problem but two real bugs surfaced on
-the way to it:** the SageMaker SDK defaults to staging code and model
-output in an auto-named `sagemaker-<region>-<account-id>` bucket that our
-IAM policy correctly doesn't grant access to (scoped to
-`fraud-detection-sagemaker-*` only) — fixed by deriving `code_location`
-and `output_path` from the same bucket passed via `--s3-input-uri`. Also
-found the boto3 session was resolving to `us-west-2` (the CLI's configured
-default region) while the data bucket actually lives in `us-east-1` (from
-`sagemaker_upload_data.py`'s own default) — the `SKLearn` estimator has no
-standalone `--region` flag, so this now threads a `boto3.Session` with the
-explicit `--region` argument through a `sagemaker.session.Session`. Worth
-committing alongside this doc update.
-
-### 7. Register the artifact in MLflow
+### 7. Register the artifact in MLflow — done
 Bring up the local stack first if it's not already running
 (`docker compose up -d mlflow`), then:
 ```
 .venv-sagemaker/Scripts/python training/register_sagemaker_model.py \
   --model-data <printed by step 6> --job-name <printed by step 6>
 ```
-Confirm in the MLflow UI (`http://localhost:5000`): a
-`random_forest_sagemaker` run should appear alongside the 4 Session 5
-runs, tagged `trained_via=sagemaker`.
+Confirmed in the MLflow UI (`http://localhost:5000`): the
+`random_forest_sagemaker` run appears alongside the 4 Session 5 runs,
+tagged `trained_via=sagemaker`. Required two dependency fixes first — see
+"Bugs found launching the job" above (scikit-learn version pin, then the
+mlflow/mlflow-skinny mismatch, in that order).
 
-### 8. Mandatory cost/safety check (do not skip)
+### 8. Mandatory cost/safety check — done
 ```
-aws sagemaker list-endpoints            # must be empty -- no endpoint was created this session
-aws sagemaker list-notebook-instances   # must be empty -- no notebook was created this session
-aws s3api get-bucket-lifecycle-configuration --bucket fraud-detection-sagemaker-<account-id>
+aws sagemaker list-endpoints --region ap-southeast-2            # empty
+aws sagemaker list-endpoints --region us-east-1                 # empty
+aws sagemaker list-notebook-instances --region ap-southeast-2   # empty
+aws sagemaker list-notebook-instances --region us-east-1        # empty
+aws s3api get-bucket-lifecycle-configuration --bucket fraud-detection-sagemaker-183079729790-syd --region ap-southeast-2
+aws s3api get-bucket-lifecycle-configuration --bucket fraud-detection-sagemaker-183079729790 --region us-east-1
 ```
-Record the actual dollar cost incurred (visible in Billing → Cost
-Explorer or the training job's billing details, typically well under $1
-for one ~10-minute `ml.m5.large` spot job) in `SESSIONS.md`'s Session 6
-log, then check off the remaining Session 6 tasks there.
+All confirmed clean in both regions touched this session. Actual spend:
+see "Final result" above (~$0.07 training compute + negligible storage).
+
+**Known gap, not fixed:** the 14-day lifecycle rule only covers the
+`training-data/` prefix. `sagemaker_launch.py`'s `code_location`/
+`output_path` fix writes to `code/` and `output/` in the same bucket,
+which have **no** expiration rule — the ~326 MB training data will
+self-clean, but the (much smaller — low MB) code bundle and model
+artifact under those prefixes will persist indefinitely unless manually
+deleted. Low cost impact at this size, but worth widening the lifecycle
+rule to the whole bucket next time this is touched, now that the model
+artifact is safely inside MLflow's own artifact store and the S3 copy is
+redundant.
 
 ## Why Random Forest, not the LSTM, for this session
 
@@ -208,11 +287,16 @@ retrain (flagged as future work in `docs/model_comparison.md`) is a
 reasonable Session 6 stretch goal but not required for the session's
 "at least one model" definition of done.
 
-## Framework version note
+## Framework version note (corrected 2026-08-04)
 
 `sagemaker_launch.py` pins `framework_version="1.2-1"` for the managed
-SKLearn container (AWS's prebuilt SageMaker SKLearn images don't ship
-every PyPI scikit-learn version) vs. `scikit-learn==1.4.2` pinned locally.
-`RandomForestClassifier`'s relevant API (`class_weight`, `n_estimators`,
-`max_depth`, `min_samples_leaf`, `predict_proba`) is stable across that
-gap — no behavior-relevant difference expected for this model.
+SKLearn container. **This section originally claimed the gap to
+`scikit-learn==1.4.2` locally had "no behavior-relevant difference
+expected" — that was wrong.** `RandomForestClassifier`'s fit/predict API
+is stable across the gap, but the *pickled model's binary layout* is not:
+scikit-learn 1.3 changed the internal tree-node struct, so a model
+trained under 1.2.1 cannot be `joblib.load`ed under 1.4.2 or later. The
+container version and the loading environment's scikit-learn version must
+match exactly for deserialization, even though the training/inference API
+itself didn't change. `.venv-sagemaker` now pins `scikit-learn==1.2.1` for
+this reason (see "Bugs found launching the job" above).
