@@ -65,8 +65,11 @@ monitoring/drift_reports/
 infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.*
-infra/**/.terraform.lock.hcl
 infra/**/*.tfvars
+# .terraform.lock.hcl is deliberately NOT ignored -- Terraform's own docs
+# recommend committing it for reproducible provider version resolution
+# (this was excluded here pre-emptively before Session 10 wrote any actual
+# Terraform config; fixed once real config existed to test the point).
 
 # Kubernetes local state
 k8s/**/*.local.yaml

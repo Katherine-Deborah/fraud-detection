@@ -1,0 +1,25 @@
+# Session 10: keeps the build context small for both Dockerfile.airflow and
+# Dockerfile.serving -- without this, every `docker compose build` sends the
+# multi-GB .venv*/data/ directories to the daemon even though neither image
+# COPYs them (Dockerfile.airflow relies on a bind mount for project code,
+# Dockerfile.serving does too -- see docker-compose.yml's fastapi-gateway
+# service).
+.git/
+.venv/
+.venv-sagemaker/
+.venv-registry/
+.venv-serving/
+data/
+mlruns/
+mlartifacts/
+docs/eda/
+monitoring/drift_reports/
+serving/_prom_multiproc/
+serving/_export_staging/
+serving/triton_model_repo/
+k8s/
+infra/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

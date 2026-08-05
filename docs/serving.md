@@ -243,26 +243,39 @@ client, not the Triton call, is the dominant cost under concurrency.
 
 ## Running it yourself
 
+**Session 10 containerized this gateway** (`fastapi-gateway` in
+`docker-compose.yml` -- see `docs/deployment.md`); this is now the primary
+way to run it. The local-venv path below still works unmodified and is
+useful for fast iteration/debugging without a rebuild.
+
 ```bash
 # 1. Export the production model (once per production-model change)
 .venv-registry/Scripts/python training/fetch_production_model.py
 .venv-registry/Scripts/python training/export_to_onnx.py
 
-# 2. Bring up Triton + Redis
-docker compose up -d redis triton
+# 2. Bring up the full stack (or just its dependencies -- see below)
+docker compose up -d
 
-# 3. Run the gateway (local process, not containerized -- see docker-compose.yml)
-python -m venv .venv-serving
-.venv-serving/Scripts/pip install -r requirements-serving.txt
-.venv-serving/Scripts/python -m uvicorn serving.app:app --host 0.0.0.0 --port 8090 --workers 4
-
-# 4. Score a transaction
+# 3. Score a transaction
 curl -X POST http://localhost:8090/predict -H "Content-Type: application/json" \
   -d '{"account_id":"acct_000000","amount":123.45,"merchant_category":"electronics"}'
 
-# 5. Load test
+# 4. Load test (still runs from the host against the containerized gateway --
+#    same port, same behavior)
+python -m venv .venv-serving
+.venv-serving/Scripts/pip install -r requirements-serving.txt
 .venv-serving/Scripts/locust -f serving/locustfile.py --headless \
   -u 100 -r 20 -t 60s --host http://localhost:8090 --csv=docs/eda/load_test
+```
+
+**Alternative: run the gateway as a local host process** (no image
+rebuild needed for code changes that don't touch dependencies; this is
+what Sessions 8/9's numbers in this doc were measured against):
+
+```bash
+docker compose up -d redis triton
+.venv-serving/Scripts/python -m uvicorn serving.app:app --host 0.0.0.0 --port 8090 --workers 4
+# or: .venv-serving/Scripts/python serving/run_server.py   (adds Prometheus multiprocess support)
 ```
 
 Raw Locust output for the runs in this doc: `docs/eda/load_test_stats.csv`

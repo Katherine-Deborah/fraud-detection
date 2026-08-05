@@ -5,10 +5,16 @@
 #   Session 3  -> redis
 #   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler
 #   Session 5  -> mlflow
-#   Session 8  -> triton (fastapi gateway runs as a local process for now,
-#                 like producer/consumer -- containerizing it is Session 10's
-#                 job when the full compose file gets finalized)
-#   Session 9  -> prometheus, grafana  <- this session
+#   Session 8  -> triton
+#   Session 9  -> prometheus, grafana
+#   Session 10 -> fastapi-gateway (finalizes the file: every service from
+#                 Sessions 2-9 now starts via `docker compose up`, wired with
+#                 depends_on + healthchecks, not just declaration order).
+#                 producer/consumer stay local processes, not services --
+#                 they're demo-triggered one-shot scripts (replay a batch,
+#                 consume it), not long-running infra, matching how this file
+#                 has always drawn the "service vs. script" line (see
+#                 docs/serving.md and docs/monitoring.md's session-end notes).
 
 x-airflow-common:
   &airflow-common
@@ -214,6 +220,46 @@ services:
       retries: 15
       start_period: 30s
 
+  fastapi-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.serving
+      target: dev
+    container_name: fraud-fastapi-gateway
+    environment:
+      # Same override pattern as Airflow (see x-airflow-common-env above):
+      # "localhost" inside this container means the gateway's own container,
+      # not the redis/triton services, so both must be pointed at their
+      # compose service names explicitly.
+      FEAST_REDIS_CONNECTION_STRING: redis:6379
+      TRITON_HTTP_URL: http://triton:8000
+      PYTHONPATH: /app
+      # Not under the bind-mounted ./serving -- see serving/run_server.py's
+      # comment on the PermissionError this caused when it defaulted there.
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prom_multiproc
+    volumes:
+      # Same split as Dockerfile.serving's own comment: source is mounted,
+      # not baked in, so a model re-export (training/export_to_onnx.py) or a
+      # `feast apply` is picked up on container restart with no rebuild.
+      - ./serving:/app/serving
+      - ./feature_store:/app/feature_store
+      - ./data_generation:/app/data_generation
+    ports:
+      - "8090:8090"
+    depends_on:
+      redis:
+        condition: service_healthy
+      triton:
+        condition: service_healthy
+    healthcheck:
+      # No curl in python:3.11-slim -- same urllib-based check as mlflow's,
+      # above.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8090/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   prometheus:
     image: prom/prometheus:v3.0.1
     container_name: fraud-prometheus
@@ -222,10 +268,11 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"
-    # host.docker.internal (used by prometheus.yml to scrape the FastAPI
-    # gateway, which runs as a local host process -- see serving/app.py's
-    # module docstring) resolves out of the box on Docker Desktop for
-    # Windows/Mac. No extra_hosts entry needed here.
+    depends_on:
+      triton:
+        condition: service_healthy
+      fastapi-gateway:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
       interval: 10s

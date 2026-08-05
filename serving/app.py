@@ -79,7 +79,12 @@ from feature_store.store_utils import get_feature_store  # noqa: E402
 
 FEATURE_REPO = REPO_ROOT / "feature_store" / "feature_repo"
 METADATA_PATH = REPO_ROOT / "serving" / "model_metadata.json"
-TRITON_HTTP_URL = "http://localhost:8000"
+# Defaults to the host-process value used since Session 8 (docs/serving.md).
+# Session 10 containerizes this gateway, where "localhost" would mean the
+# gateway's own container rather than the triton service -- docker-compose.yml
+# overrides this to http://triton:8000 for that container, the same pattern
+# already used for FEAST_REDIS_CONNECTION_STRING (feature_store/store_utils.py).
+TRITON_HTTP_URL = os.environ.get("TRITON_HTTP_URL", "http://localhost:8000")
 
 # --- Prometheus metrics (Session 9) -----------------------------------
 #

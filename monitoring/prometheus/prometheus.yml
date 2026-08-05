@@ -1,9 +1,10 @@
-# Session 9: scrape targets for the fraud detection stack.
+# Scrape targets for the fraud detection stack.
 #
-# fraud-gateway: the FastAPI gateway (serving/app.py) runs as a local host
-# process, not a compose service (Session 8's documented decision;
-# containerizing it is Session 10's job) -- host.docker.internal is how a
-# container reaches back out to the host on Docker Desktop for Windows/Mac.
+# fraud-gateway: the FastAPI gateway (serving/app.py) is now the
+# fastapi-gateway compose service (Session 10 -- previously a local host
+# process scraped via host.docker.internal, see git history of this file),
+# reachable by its service name on the compose network like every other
+# service here.
 #
 # triton: already a compose service, reachable by its service name on the
 # compose network. Port 8002 is Triton's built-in Prometheus metrics
@@ -17,7 +18,7 @@ scrape_configs:
   - job_name: fraud-gateway
     metrics_path: /metrics
     static_configs:
-      - targets: ["host.docker.internal:8090"]
+      - targets: ["fastapi-gateway:8090"]
 
   - job_name: triton
     metrics_path: /metrics

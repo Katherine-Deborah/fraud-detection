@@ -23,7 +23,16 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MULTIPROC_DIR = Path(__file__).resolve().parent / "_prom_multiproc"
+# Session 10: containerized (docker-compose.yml's fastapi-gateway service)
+# runs bind-mount serving/ from the host, and this directory's previous
+# contents (written by a prior host-process run, or by a different
+# container's PID range) can end up with permissions the container's user
+# can't rmtree through Docker Desktop's file-sharing layer -- seen directly
+# as `PermissionError: counter_NNNNN.db` on startup. A container-internal
+# path (unset host bind mount covering it) sidesteps that entirely; the
+# default stays serving/_prom_multiproc for host-process runs (unchanged
+# since Session 9).
+MULTIPROC_DIR = Path(os.environ.get("PROMETHEUS_MULTIPROC_DIR", str(Path(__file__).resolve().parent / "_prom_multiproc")))
 
 
 def main() -> None:
@@ -52,7 +61,15 @@ def main() -> None:
 
     import uvicorn
 
-    uvicorn.run("serving.app:app", host="0.0.0.0", port=8090, workers=4)
+    # 4 workers by default -- the number Session 8's load testing tuned this
+    # for on a single host process. Session 10's k8s Deployment overrides
+    # this down to 1: with 2 replicas already providing parallelism (and a
+    # real cluster scaling replica count, not per-pod worker count, to add
+    # capacity), 4 workers per pod meant 8 total uvicorn processes each
+    # loading pandas/numpy/feast, which OOM-killed pods at a reasonable
+    # memory limit -- see k8s/serving-deployment.yaml.
+    workers = int(os.environ.get("UVICORN_WORKERS", "4"))
+    uvicorn.run("serving.app:app", host="0.0.0.0", port=8090, workers=workers)
 
 
 if __name__ == "__main__":

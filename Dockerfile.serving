@@ -1,0 +1,33 @@
+# Session 10: containerizes the FastAPI gateway (serving/app.py), previously
+# run as a local host process (Session 8/9 -- see docker-compose.yml's
+# original header comment). Two build targets, same dependency layer:
+#
+#   dev  (default) -- bakes in only Python dependencies; project source
+#         (serving/, feature_store/, data_generation/) is bind-mounted by
+#         docker-compose.yml, matching Dockerfile.airflow's existing split,
+#         so code/model changes don't require a rebuild.
+#
+#   k8s  -- a real cluster has no portable equivalent of a host bind mount
+#         (hostPath is node-local, not something a Deployment should rely
+#         on), so this target COPYs the source *and* the generated
+#         artifacts a fresh checkout wouldn't have
+#         (feature_store/feature_repo/registry.db, serving/model_metadata.json)
+#         into a self-contained, immutable image -- the standard k8s
+#         pattern. Rebuild it whenever the production model changes
+#         (training/export_to_onnx.py) or `feast apply` regenerates the
+#         registry. See k8s/README.md.
+FROM python:3.11-slim AS base
+
+WORKDIR /app
+
+COPY requirements-serving.txt /requirements-serving.txt
+RUN pip install --no-cache-dir -r /requirements-serving.txt
+
+FROM base AS dev
+CMD ["python", "serving/run_server.py"]
+
+FROM base AS k8s
+COPY serving/ /app/serving/
+COPY feature_store/ /app/feature_store/
+COPY data_generation/ /app/data_generation/
+CMD ["python", "serving/run_server.py"]

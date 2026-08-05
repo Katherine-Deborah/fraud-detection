@@ -1,0 +1,16 @@
+# Session 10: ClusterIP is enough for the demo (reached via
+# `kubectl port-forward`, see k8s/README.md) -- a NodePort/LoadBalancer
+# would be the right call for a real external-facing deployment, but that's
+# a production-networking concern out of scope for "prove the manifests
+# work against a real cluster."
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-fastapi-gateway
+spec:
+  selector:
+    app: fraud-fastapi-gateway
+  ports:
+    - port: 8090
+      targetPort: 8090
+  type: ClusterIP

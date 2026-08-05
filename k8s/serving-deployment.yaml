@@ -1,0 +1,90 @@
+# Session 10: k8s Deployment for the serving layer only (PROJECT.md §5.9 /
+# SESSIONS.md Session 10 -- "Kubernetes manifests ... for the serving
+# layer", deliberately narrow, same principle as infra/terraform's
+# SageMaker-only scope). Redis and Triton are NOT redeployed into the
+# cluster here; this Deployment reaches the same redis/triton containers
+# already running via docker-compose.yml, through host.docker.internal --
+# see k8s/README.md for the full reasoning and how this would differ in a
+# real (non-local) cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-fastapi-gateway
+  labels:
+    app: fraud-fastapi-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-fastapi-gateway
+  template:
+    metadata:
+      labels:
+        app: fraud-fastapi-gateway
+    spec:
+      # A kind node is a container, not the real host -- host.docker.internal
+      # resolves fine *inside the node container itself* (confirmed via
+      # `docker exec <node> getent ahostsv4 host.docker.internal`), but pods
+      # run in their own CNI network namespace (kindnet), which has no
+      # /etc/hosts or DNS entry for it at all -- this is why the env vars
+      # below resolved to "connection refused" until this was added.
+      # hostAliases pins the same IP Docker Desktop already resolves that
+      # name to on the node (192.168.65.254 at the time this was written --
+      # re-run the getent command above if this manifest ever fails to
+      # connect, and update the IP below; see k8s/README.md).
+      hostAliases:
+        - ip: "192.168.65.254"
+          hostnames:
+            - "host.docker.internal"
+      containers:
+        - name: fastapi-gateway
+          # Built via `docker build -f Dockerfile.serving --target k8s`,
+          # loaded into the kind cluster with `kind load docker-image`
+          # (no registry involved) -- see k8s/README.md. imagePullPolicy
+          # Never enforces that this always resolves to the locally loaded
+          # image rather than a real registry pull ever being attempted.
+          image: fraud-detection-fastapi-gateway:k8s
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8090
+          env:
+            # host.docker.internal: this Deployment's dependencies (Redis,
+            # Triton) are the same containers docker-compose.yml already
+            # runs on the host's Docker Desktop engine, reachable from a
+            # kind node the same way any Docker Desktop container reaches
+            # the host. Same override mechanism as the dev docker-compose
+            # service (feature_store/store_utils.py /
+            # TRITON_HTTP_URL in serving/app.py), different target host.
+            - name: FEAST_REDIS_CONNECTION_STRING
+              value: "host.docker.internal:6380"
+            - name: TRITON_HTTP_URL
+              value: "http://host.docker.internal:8000"
+            - name: PYTHONPATH
+              value: "/app"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prom_multiproc"
+            # 1 worker/pod, not the docker-compose default of 4 -- see
+            # serving/run_server.py's comment. Horizontal scaling is
+            # `kubectl scale deployment/fraud-fastapi-gateway --replicas=N`,
+            # not more workers crammed into one pod.
+            - name: UVICORN_WORKERS
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "384Mi"
+            limits:
+              cpu: "1"
+              memory: "768Mi"
