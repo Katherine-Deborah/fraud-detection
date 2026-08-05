@@ -33,3 +33,10 @@ pydantic==2.13.4
 requests==2.34.2
 feast[redis]==0.65.0
 locust==2.46.3
+
+# Session 9: gateway metrics (serving/app.py). Pinned to 0.24.1, not the
+# latest 0.26.0 -- feast==0.65.0 requires prometheus_client<0.25.0,>=0.20.0
+# (it uses the client internally for its own push-gateway support), and
+# 0.24.1 already has full multiprocess-mode support (serving/run_server.py
+# needs only 0.20+).
+prometheus-client==0.24.1

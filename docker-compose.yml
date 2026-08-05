@@ -3,12 +3,12 @@
 # Planned additions:
 #   Session 2  -> kafka (KRaft mode, no Zookeeper)
 #   Session 3  -> redis
-#   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler  <- this session
-#   Session 5  -> mlflow  <- this session
+#   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler
+#   Session 5  -> mlflow
 #   Session 8  -> triton (fastapi gateway runs as a local process for now,
 #                 like producer/consumer -- containerizing it is Session 10's
 #                 job when the full compose file gets finalized)
-#   Session 9  -> prometheus, grafana
+#   Session 9  -> prometheus, grafana  <- this session
 
 x-airflow-common:
   &airflow-common
@@ -37,6 +37,19 @@ x-airflow-common:
     - ./data_generation:/opt/airflow/project/data_generation
     - ./feature_store:/opt/airflow/project/feature_store
     - ./data:/opt/airflow/project/data
+    # Session 9: the drift_report task imports training.data_prep for its
+    # feature-matrix schema (FEATURE_COLUMNS/build_feature_matrix) rather
+    # than duplicating that logic -- see dags/fraud_pipeline_dag.py. Only
+    # data_prep.py's non-sklearn helpers are actually used, but the whole
+    # directory is mounted to match every other volume in this block
+    # (one mount per source directory, not per file).
+    - ./training:/opt/airflow/project/training
+    # drift_report writes its HTML/JSON reports here. Without this mount,
+    # PROJECT_ROOT/monitoring doesn't exist as a real path inside the
+    # container at all (it isn't backed by any bind mount), and mkdir on it
+    # fails with a permission error rather than "not found" -- caught by
+    # actually running the task, not by inspection.
+    - ./monitoring:/opt/airflow/project/monitoring
   depends_on:
     &airflow-common-depends-on
     postgres:
@@ -193,7 +206,7 @@ services:
     ports:
       - "8000:8000"  # HTTP inference
       - "8001:8001"  # gRPC inference
-      - "8002:8002"  # Prometheus metrics (wired up properly in Session 9)
+      - "8002:8002"  # Prometheus metrics -- scraped by the prometheus service below
     healthcheck:
       test: ["CMD-SHELL", "curl --fail http://localhost:8000/v2/health/ready || exit 1"]
       interval: 10s
@@ -201,6 +214,53 @@ services:
       retries: 15
       start_period: 30s
 
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: fraud-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    # host.docker.internal (used by prometheus.yml to scrape the FastAPI
+    # gateway, which runs as a local host process -- see serving/app.py's
+    # module docstring) resolves out of the box on Docker Desktop for
+    # Windows/Mac. No extra_hosts entry needed here.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: fraud-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Provisioned dashboard should be the thing a demo lands on, not an
+      # empty home screen.
+      GF_DEFAULT_APP_MODE: production
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Datasource + dashboard provisioning -- the dashboard exists and is
+      # wired to Prometheus the moment the container starts, no manual
+      # click-through setup required for the demo.
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
 volumes:
   airflow-postgres-data:
   mlflow-data:
+  prometheus-data:
+  grafana-data:

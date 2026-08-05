@@ -9,3 +9,27 @@ numpy==2.4.6
 pyarrow==25.0.0
 feast[redis]==0.65.0
 great_expectations==1.19.1
+
+# Session 9: drift_report task (dags/fraud_pipeline_dag.py). Confirmed
+# clean install alongside the pins above -- no numpy/pandas/pyarrow
+# downgrade, unlike the mlflow/sagemaker conflicts hit in Sessions 6/7/8 --
+# so no isolated venv needed this time. Note: evidently transitively pulls
+# in scikit-learn itself (for its own internal drift methods); that's
+# incidental to evidently, not a dependency this project's own code
+# declares -- training/data_prep.py's functions that genuinely need
+# sklearn import it lazily rather than relying on that transitive pull.
+evidently==0.7.21
+
+# evidently declares no upper bound on cryptography, so pip's resolver
+# silently picked the latest (50.0.0) -- which breaks pyOpenSSL (a
+# dependency of apache-airflow-providers-amazon, already present in the
+# base airflow image; imported transitively by great_expectations'
+# compatibility.aws module, so it breaks *validate_batch* even though this
+# project doesn't otherwise use AWS from Airflow) at runtime with
+# `AttributeError: module 'lib' has no attribute 'GEN_EMAIL'`, not an
+# install-time failure -- pip only printed a non-blocking warning
+# ("pyopenssl 24.3.0 requires cryptography<45,>=41.0.5, but you have
+# cryptography 50.0.0"), so this was caught by actually running the DAG,
+# not by reading pip's output. Pinning explicitly to what pyOpenSSL itself
+# declares needing.
+cryptography==44.0.3

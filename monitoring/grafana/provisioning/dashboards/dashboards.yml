@@ -1,0 +1,13 @@
+# Session 9: tells Grafana to load every dashboard JSON in this directory
+# on startup, so the demo dashboard exists without a manual import step.
+apiVersion: 1
+
+providers:
+  - name: fraud-detection
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

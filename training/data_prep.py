@@ -24,13 +24,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (
-    average_precision_score,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_curve,
-)
+
+# scikit-learn is imported lazily, inside the functions that actually need
+# it (select_threshold_for_fpr / evaluate_at_threshold), not at module level.
+# Session 9's Airflow drift_report task imports this module purely for its
+# feature-matrix schema (FEATURE_COLUMNS, build_feature_matrix,
+# load_dataset) -- none of which touch sklearn -- and the Airflow image
+# (requirements-airflow.txt) deliberately doesn't carry a scikit-learn
+# pin, so a module-level `from sklearn.metrics import ...` would break that
+# import for no reason.
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -159,6 +161,8 @@ def select_threshold_for_fpr(
     fpr_target, chosen on a held-out (validation) set -- never on test.
     Returns (threshold, achieved_fpr, recall_at_that_fpr). If no threshold
     achieves the target FPR, falls back to the lowest achievable FPR."""
+    from sklearn.metrics import roc_curve
+
     fpr, tpr, thresholds = roc_curve(y_true, y_score)
     eligible = np.where(fpr <= fpr_target)[0]
     if len(eligible) > 0:
@@ -171,6 +175,8 @@ def select_threshold_for_fpr(
 def evaluate_at_threshold(
     y_true: np.ndarray, y_score: np.ndarray, threshold: float
 ) -> dict[str, float]:
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
     y_pred = (y_score >= threshold).astype(int)
     return {
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
@@ -189,6 +195,8 @@ def evaluate_model(
     """Threshold is selected on validation (at the target FPR from
     PROJECT.md #6), then applied unchanged to test. AUC-PR is
     threshold-independent and computed directly on test."""
+    from sklearn.metrics import average_precision_score
+
     threshold, val_fpr, val_recall_at_fpr = select_threshold_for_fpr(y_val, val_score, fpr_target)
     test_metrics = evaluate_at_threshold(y_test, test_score, threshold)
     return {

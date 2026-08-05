@@ -1,0 +1,12 @@
+# Session 9: auto-provisions the Prometheus datasource so the demo doesn't
+# depend on anyone clicking through Grafana's "Add data source" UI first.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

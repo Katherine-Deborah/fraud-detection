@@ -55,6 +55,17 @@ def parse_args() -> argparse.Namespace:
         help="Every Nth message is deliberately corrupted, to exercise consumer error handling (0 = disabled)",
     )
     p.add_argument("--seed", type=int, default=42, help="Seed for malformed-message sampling")
+    p.add_argument(
+        "--amount-multiplier",
+        type=float,
+        default=1.0,
+        help=(
+            "Scales every replayed amount by this factor before sending -- "
+            "a deliberate, documented synthetic distribution shift for "
+            "exercising the Session 9 Evidently drift report (see "
+            "docs/monitoring.md). 1.0 = no shift (default)."
+        ),
+    )
     return p.parse_args()
 
 
@@ -92,6 +103,12 @@ def main() -> None:
     df = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
     if args.limit:
         df = df.head(args.limit)
+    if args.amount_multiplier != 1.0:
+        df["amount"] = (df["amount"] * args.amount_multiplier).round(2)
+        log.warning(
+            "Injecting synthetic drift: scaling amount by %.2fx for this replay",
+            args.amount_multiplier,
+        )
     log.info("Replaying %d rows at %.1f tx/sec (topic=%s)", len(df), args.rate, args.topic)
 
     producer = Producer({"bootstrap.servers": args.bootstrap_servers})

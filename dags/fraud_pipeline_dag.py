@@ -19,6 +19,7 @@ engineering, so a bad batch never reaches feature computation or Feast.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime
@@ -140,10 +141,87 @@ def fraud_pipeline():
         store.push("transactions_push_source", df, to=PushMode.ONLINE)
         print(f"Pushed {len(df)} feature rows to the Feast online store.")
 
+    @task()
+    def drift_report(features_path: str) -> dict:
+        """Session 9: compares this run's freshly computed feature batch
+        against a fixed snapshot of the training feature distribution
+        (data/processed/reference_features.parquet, produced once by
+        training/export_reference_distribution.py) using Evidently's
+        DataDriftPreset.
+
+        This is a periodic *report*, not a data-quality gate like
+        validate_batch -- a drifted distribution isn't malformed data (that
+        would already have failed validate_batch), so this task never fails
+        the DAG on drift; it logs a clear signal and writes an HTML/JSON
+        report instead. See docs/monitoring.md for the live-verified run
+        that confirms this actually flags an injected shift."""
+        from evidently import Report
+        from evidently.core.report import TestStatus
+        from evidently.presets import DataDriftPreset
+
+        from training.data_prep import FEATURE_COLUMNS, build_feature_matrix
+
+        reference_path = PROCESSED_DIR / "reference_features.parquet"
+        fill_values_path = PROCESSED_DIR / "reference_fill_values.json"
+        if not reference_path.exists() or not fill_values_path.exists():
+            raise FileNotFoundError(
+                f"{reference_path} / {fill_values_path} not found -- run "
+                "training/export_reference_distribution.py once first "
+                "(see docs/monitoring.md)."
+            )
+
+        reference = pd.read_parquet(reference_path)
+        fill_values = json.loads(fill_values_path.read_text(encoding="utf-8"))
+
+        # Same 29-column schema/sentinel-fill logic training used to build
+        # X_train (training.data_prep.build_feature_matrix), applied here to
+        # this run's raw engineered-feature batch so the two sides of the
+        # comparison are on identical footing -- not the raw 15-feature
+        # output feature_engineering() just wrote.
+        current_raw = pd.read_parquet(features_path)
+        current = build_feature_matrix(current_raw, fill_values)[FEATURE_COLUMNS]
+
+        report = Report(metrics=[DataDriftPreset()], include_tests=True)
+        snapshot = report.run(current_data=current, reference_data=reference)
+
+        reports_dir = PROJECT_ROOT / "monitoring" / "drift_reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
+        html_path = reports_dir / f"drift_{run_id}.html"
+        snapshot.save_html(str(html_path))
+
+        result = snapshot.dict()
+        # "lt" is DataDriftPreset's aggregate test id (from include_tests
+        # smoke-testing this API): "Share of Drifted Columns: Less than
+        # <drift_share>" -- FAIL means the drifted-column share crossed
+        # DriftedColumnsCount's default 0.5 threshold.
+        overall_test = next(t for t in result["tests"] if t["id"] == "lt")
+        drifted = result["metrics"][0]["value"]
+        drift_detected = overall_test["status"] == TestStatus.FAIL
+
+        if drift_detected:
+            print(
+                f"DRIFT DETECTED: {drifted['count']:.0f}/{len(FEATURE_COLUMNS)} "
+                f"columns drifted ({drifted['share']:.1%}) vs. the training "
+                f"reference distribution. Report: {html_path}"
+            )
+        else:
+            print(
+                f"No dataset drift detected ({drifted['share']:.1%} of "
+                f"columns drifted). Report: {html_path}"
+            )
+        return {
+            "drift_detected": drift_detected,
+            "drifted_column_count": drifted["count"],
+            "drifted_column_share": drifted["share"],
+            "report_path": str(html_path),
+        }
+
     batch_path = ingest_batch()
     validated_path = validate_batch(batch_path)
     features_path = feature_engineering(validated_path)
     materialize_to_feast(features_path)
+    drift_report(features_path)
 
 
 fraud_pipeline()

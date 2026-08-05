@@ -46,6 +46,7 @@ accepts fields that actually affect the score.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 import uuid
@@ -56,8 +57,17 @@ from typing import Any
 
 import numpy as np
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+    multiprocess,
+)
+from prometheus_client import REGISTRY as DEFAULT_REGISTRY
 from pydantic import BaseModel, Field, field_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +80,54 @@ from feature_store.store_utils import get_feature_store  # noqa: E402
 FEATURE_REPO = REPO_ROOT / "feature_store" / "feature_repo"
 METADATA_PATH = REPO_ROOT / "serving" / "model_metadata.json"
 TRITON_HTTP_URL = "http://localhost:8000"
+
+# --- Prometheus metrics (Session 9) -----------------------------------
+#
+# docs/serving.md documents running this gateway as `uvicorn --workers 4`
+# (needed to hit any real throughput at all on this Windows/ProactorEventLoop
+# setup). That means 4 separate OS processes, each with its own in-memory
+# Counter/Histogram state -- a naive /metrics scrape would only ever see
+# whichever one worker happened to handle that particular request, not the
+# aggregate across all 4. prometheus_client's documented fix is multiprocess
+# mode: set PROMETHEUS_MULTIPROC_DIR to an empty directory *before* any
+# worker imports this module, and each worker then writes its counters to
+# per-PID mmap files there instead of pure memory; /metrics aggregates them
+# across files at scrape time via MultiProcessCollector. The directory must
+# be created/emptied exactly once by the parent process before workers fork
+# -- see serving/run_server.py, the launcher that does that. Running this
+# module directly (e.g. `uvicorn serving.app:app` with no --workers, for
+# quick local testing) works unmodified: MULTIPROC_DIR is simply unset and
+# everything falls back to the default single-process registry.
+MULTIPROC_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+
+if MULTIPROC_DIR:
+    # The default registry's process/platform/GC collectors report on only
+    # the current process and don't aggregate meaningfully across workers in
+    # multiprocess mode -- prometheus_client's own docs say to drop them.
+    from prometheus_client import GC_COLLECTOR, PLATFORM_COLLECTOR, PROCESS_COLLECTOR
+
+    for collector in (GC_COLLECTOR, PLATFORM_COLLECTOR, PROCESS_COLLECTOR):
+        try:
+            DEFAULT_REGISTRY.unregister(collector)
+        except KeyError:
+            pass
+
+REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Total HTTP requests handled by the gateway",
+    ["method", "path", "status_code"],
+)
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "path"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10),
+)
+FRAUD_PREDICTIONS = Counter(
+    "fraud_predictions_total",
+    "Predictions made, by fraud/not-fraud outcome",
+    ["is_fraud"],
+)
 
 # The 12 of the 15 engineered features that are genuinely history-dependent
 # and therefore worth fetching from the online store -- hour_of_day/
@@ -180,9 +238,32 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Fraud Detection Gateway", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+    # request.url.path is safe to use as a label directly: this gateway has
+    # exactly 3 fixed routes (/health, /predict, /metrics), no path
+    # parameters that would blow up label cardinality.
+    REQUEST_COUNT.labels(request.method, request.url.path, response.status_code).inc()
+    REQUEST_LATENCY.labels(request.method, request.url.path).observe(duration)
+    return response
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    if MULTIPROC_DIR:
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+    else:
+        registry = DEFAULT_REGISTRY
+    return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
 def build_feature_vector(req: PredictRequest, engineered: dict[str, float], metadata: dict) -> np.ndarray:
@@ -267,13 +348,16 @@ async def predict(req: PredictRequest) -> PredictResponse:
         raise HTTPException(status_code=502, detail=f"Triton inference failed: {e}") from e
 
     threshold = metadata["threshold"]
+    is_fraud = fraud_score >= threshold
     latency_ms = (time.perf_counter() - start) * 1000
+
+    FRAUD_PREDICTIONS.labels("true" if is_fraud else "false").inc()
 
     return PredictResponse(
         transaction_id=req.transaction_id or str(uuid.uuid4()),
         account_id=req.account_id,
         fraud_score=fraud_score,
-        is_fraud=fraud_score >= threshold,
+        is_fraud=is_fraud,
         threshold=threshold,
         model_version=str(metadata["model_version"]),
         algorithm=metadata["algorithm"],

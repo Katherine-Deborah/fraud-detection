@@ -55,6 +55,12 @@ mlartifacts/
 *.joblib
 serving/_export_staging/
 
+# Session 9: Prometheus multiprocess metrics dir (serving/run_server.py)
+# and generated Evidently drift reports (dags/fraud_pipeline_dag.py) --
+# both regenerated at runtime, not committed.
+serving/_prom_multiproc/
+monitoring/drift_reports/
+
 # Terraform
 infra/**/.terraform/
 infra/**/*.tfstate
