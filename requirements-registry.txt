@@ -32,3 +32,16 @@ scikit-learn==1.4.2
 pandas==2.3.3
 pyarrow==15.0.2
 matplotlib==3.9.2
+
+# Session 8: export the production model to ONNX for Triton serving
+# (training/export_to_onnx.py). Installed cleanly against this venv's
+# existing numpy<2/scikit-learn==1.4.2 pins, no resolver conflicts -- so
+# reused this venv rather than adding yet another isolated one.
+# onnxruntime pinned to 1.18.1, not latest (1.28.0): 1.28.0 fails to import
+# on this machine with "DLL load failed while importing
+# onnxruntime_pybind11_state" (likely a VC++ runtime baseline newer than
+# what's installed here) -- 1.18.1 loads cleanly and is more than recent
+# enough for a plain RandomForestClassifier graph.
+skl2onnx==1.20.0
+onnx==1.22.0
+onnxruntime==1.18.1

@@ -1,0 +1,35 @@
+# Session 8: FastAPI gateway (serving/app.py) + Locust load test
+# (serving/locustfile.py). New isolated venv, same root cause as
+# .venv-sagemaker/.venv-registry: feast==0.65.0 needs numpy>=2.0, which
+# conflicts with mlflow's numpy<2 pin. The gateway itself never imports
+# mlflow or scikit-learn at request time -- it reads the already-exported
+# serving/model_metadata.json (produced offline by
+# training/export_to_onnx.py, which runs under .venv-registry) and calls
+# Triton over HTTP for inference -- so there's no reason to fight the
+# resolver here either.
+#
+# fastapi pinned well above the version originally tried (0.115.6): feast
+# now requires starlette>=1.0.1 (a very new starlette major release), which
+# conflicts with fastapi 0.115.6's starlette<0.42 pin. fastapi==0.141.1 is
+# the first version tested that resolves cleanly against feast's starlette
+# floor.
+#
+# Triton calls go through plain `requests` (thread-pooled via FastAPI's
+# run_in_threadpool), not httpx.AsyncClient -- measured directly on this
+# machine: 200 concurrent Triton calls via httpx/asyncio topped out at
+# ~131 req/s with p99 ~435ms; the identical calls via requests + a thread
+# pool hit ~445 req/s with p99 ~145ms. Windows' asyncio ProactorEventLoop
+# has real overhead under concurrent sockets that a threaded requests.Session
+# doesn't -- see serving/app.py and docs/serving.md for the full writeup.
+# requests itself is already a transitive feast dependency; listed
+# explicitly here since serving/app.py imports it directly.
+#
+#   python -m venv .venv-serving
+#   .venv-serving/Scripts/pip install -r requirements-serving.txt
+
+fastapi==0.141.1
+uvicorn[standard]==0.34.0
+pydantic==2.13.4
+requests==2.34.2
+feast[redis]==0.65.0
+locust==2.46.3

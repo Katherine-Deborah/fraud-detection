@@ -5,7 +5,9 @@
 #   Session 3  -> redis
 #   Session 4  -> postgres, airflow-init, airflow-webserver, airflow-scheduler  <- this session
 #   Session 5  -> mlflow  <- this session
-#   Session 8  -> triton, fastapi gateway
+#   Session 8  -> triton (fastapi gateway runs as a local process for now,
+#                 like producer/consumer -- containerizing it is Session 10's
+#                 job when the full compose file gets finalized)
 #   Session 9  -> prometheus, grafana
 
 x-airflow-common:
@@ -176,6 +178,28 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  triton:
+    # CPU mode (PROJECT.md: "CPU mode is fine if no local GPU") -- no GPU
+    # reservation, config.pbtxt's instance_group is KIND_CPU. This image is
+    # large (multi-GB); the first `docker compose up` pulls it once.
+    image: nvcr.io/nvidia/tritonserver:24.09-py3
+    container_name: fraud-triton
+    command: tritonserver --model-repository=/models
+    volumes:
+      # Read-only: the model repo is written by training/export_to_onnx.py
+      # on the host, Triton only ever reads it.
+      - ./serving/triton_model_repo:/models:ro
+    ports:
+      - "8000:8000"  # HTTP inference
+      - "8001:8001"  # gRPC inference
+      - "8002:8002"  # Prometheus metrics (wired up properly in Session 9)
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8000/v2/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
 
 volumes:
   airflow-postgres-data:
