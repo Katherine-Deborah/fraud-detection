@@ -25,12 +25,32 @@ differ from the offline (jittered) values by up to roughly the jitter
 magnitude -- a few km, not zero. `feature_store/check_consistency.py`
 checks the geo features with a tolerance for exactly this reason, while
 every other feature is checked for an exact match.
+
+A second, separate gap: the consumer (consumer/consume.py) deliberately
+lands out-of-order transactions rather than dropping them. This engine
+only keeps O(1) "last transaction" state per account (not full history),
+so it cannot correctly compute `time_since_last_txn_sec` /
+`geo_distance_from_last_txn_km` against the true chronologically-previous
+transaction for an out-of-order arrival -- naively diffing against
+whatever is currently in "last" would produce a negative time delta and a
+geo-distance measured against the wrong reference point. Instead, an
+arrival older than the stored "last" timestamp falls back to the same
+`-1` sentinel used for "no prior transaction," and does not advance
+"last" state (which must only ever move forward in time, or every
+subsequent in-order arrival would compute against stale data). This is
+a real, intentional divergence from the offline computation (which always
+sorts by timestamp first and never sees this case) -- out-of-order online
+transactions get less precise velocity/geo features than their offline
+counterparts, not wrong-but-plausible ones.
 """
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -84,7 +104,16 @@ class OnlineFeatureEngine:
         pipe = self.r.pipeline()
 
         last = self.r.hgetall(p + "last")
-        if last:
+        is_out_of_order = bool(last) and ts_epoch < float(last["ts"])
+        if is_out_of_order:
+            log.warning(
+                "Out-of-order transaction for %s: ts=%s arrived after last-known ts=%s -- "
+                "falling back to the no-prior-transaction sentinel for time/geo-since-last "
+                "(see module docstring).",
+                account_id, ts, last["ts"],
+            )
+
+        if last and not is_out_of_order:
             time_since_last_txn_sec = ts_epoch - float(last["ts"])
             if lat is not None and last.get("lat") not in (None, ""):
                 geo_distance_from_last_txn_km = float(
@@ -93,10 +122,17 @@ class OnlineFeatureEngine:
             else:
                 geo_distance_from_last_txn_km = -1.0
         else:
+            # First transaction for this account, or an out-of-order arrival
+            # -- neither case has a reliable chronologically-previous
+            # transaction to compare against in this engine's O(1) state.
             time_since_last_txn_sec = -1.0
             geo_distance_from_last_txn_km = -1.0
 
-        if lat is not None:
+        # Only advance "last" forward in time. An out-of-order arrival must
+        # not overwrite state that represents a *later* transaction, or
+        # every subsequent in-order arrival would compute its own features
+        # against stale/wrong data.
+        if lat is not None and not is_out_of_order:
             pipe.hset(p + "last", mapping={"ts": ts_epoch, "lat": lat, "lon": lon})
 
         prev_amounts = self.r.lrange(p + "amounts", 0, AMOUNT_HISTORY - 1)

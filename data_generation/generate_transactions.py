@@ -79,14 +79,31 @@ def generate_accounts(n_accounts: int, rng: np.random.Generator) -> pd.DataFrame
 
 def generate_base_transactions(accounts: pd.DataFrame, n_rows: int, rng: np.random.Generator) -> pd.DataFrame:
     n_accounts = len(accounts)
+    if n_rows < n_accounts:
+        raise ValueError(
+            f"n_rows ({n_rows}) must be >= n_accounts ({n_accounts}) -- "
+            "every account gets at least one transaction."
+        )
     weights = accounts["activity_weight"].to_numpy()
     n_i = np.maximum(1, np.round(weights / weights.sum() * n_rows)).astype(int)
-    # trim/pad rounding error so the total matches n_rows exactly
+    # Trim/pad rounding error so the total matches n_rows exactly. Only ever
+    # add to accounts (always safe) or remove from accounts that have room
+    # above the 1-per-account floor -- decrementing a random account already
+    # at 1 and then re-clamping it back up to 1 (the previous approach)
+    # could silently leave the final total short of n_rows by however many
+    # accounts got clamped.
     diff = n_rows - n_i.sum()
-    if diff != 0:
-        idx = rng.integers(0, n_accounts, size=abs(diff))
-        np.add.at(n_i, idx, 1 if diff > 0 else -1)
-        n_i = np.maximum(n_i, 1)
+    if diff > 0:
+        idx = rng.integers(0, n_accounts, size=diff)
+        np.add.at(n_i, idx, 1)
+    elif diff < 0:
+        to_remove = -diff
+        while to_remove > 0:
+            candidates = np.where(n_i > 1)[0]
+            take = min(to_remove, len(candidates))
+            idx = rng.choice(candidates, size=take, replace=False)
+            n_i[idx] -= 1
+            to_remove -= take
 
     account_idx = np.repeat(np.arange(n_accounts), n_i)
     total = len(account_idx)
@@ -226,8 +243,22 @@ def compute_engineered_features(df: pd.DataFrame, accounts: pd.DataFrame) -> pd.
     df["amount_to_avg_ratio"] = df["amount"] / df["avg_amount_last_5_txns"].replace(0, np.nan)
     df["amount_to_avg_ratio"] = df["amount_to_avg_ratio"].fillna(1.0)
 
-    df["txn_count_last_1h"] = grp.rolling("1h", on="timestamp")["amount"].count().reset_index(drop=True)
-    df["txn_count_last_24h"] = grp.rolling("24h", on="timestamp")["amount"].count().reset_index(drop=True)
+    count_1h = grp.rolling("1h", on="timestamp")["amount"].count()
+    count_24h = grp.rolling("24h", on="timestamp")["amount"].count()
+    # groupby-rolling's result is only correct to assign back positionally
+    # (via .to_numpy(), below) because its row order happens to match df's
+    # row order exactly -- true because df is sorted by (account_id,
+    # timestamp) immediately above and groupby(sort=False) preserves that
+    # order. That's an invariant of *this* code, not something pandas
+    # guarantees in general, so assert it explicitly: if a future change
+    # ever breaks the assumption, this fails loudly here instead of
+    # silently misaligning txn_count_last_1h/24h with the rest of the row.
+    assert (count_1h.index.get_level_values(1).to_numpy() == df["timestamp"].to_numpy()).all(), (
+        "groupby-rolling result no longer aligns positionally with df -- "
+        "txn_count_last_1h/24h assignment below would be silently wrong"
+    )
+    df["txn_count_last_1h"] = count_1h.to_numpy()
+    df["txn_count_last_24h"] = count_24h.to_numpy()
 
     is_new_device = (grp["device_id"].transform(lambda s: ~s.duplicated())).astype(int)
     is_new_category = (grp["merchant_category"].transform(lambda s: ~s.duplicated())).astype(int)

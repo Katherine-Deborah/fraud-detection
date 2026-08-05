@@ -26,7 +26,15 @@ REQUIRED_FIELDS = [
 # Generous plausibility bound, not a tight statistical one -- this exists to
 # catch corruption (a units bug, a stray negative, a parsing error turning
 # "12.50" into "1250000"), not to flag genuinely large legitimate purchases.
-MAX_PLAUSIBLE_AMOUNT = 50_000.0
+# Must stay comfortably above the generator's own worst case: Pattern C
+# fraud (data_generation/generate_transactions.py) can multiply a jewelry/
+# cash_advance mean by up to an 8x fraud factor and a fat-tailed lognormal
+# draw -- the committed 5M-row dataset's actual max is $79,121.79 (one of
+# the 10,000 fraud rows). 50,000 was too tight and rejected that legitimate
+# fraud example; 250,000 leaves several times that much headroom while
+# still catching genuine corruption (e.g. a decimal-shift bug landing at
+# 1,250,000).
+MAX_PLAUSIBLE_AMOUNT = 250_000.0
 
 
 class BatchValidationError(Exception):

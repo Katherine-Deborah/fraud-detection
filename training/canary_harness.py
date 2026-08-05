@@ -68,7 +68,10 @@ def run_canary(client, candidate_version) -> tuple[bool, dict]:
     y_test = test_df["is_fraud"].astype(int)
 
     is_canary = test_df["account_id"].apply(_is_canary_account)
-    print(f"canary slice: {is_canary.sum():,} rows ({is_canary.mean():.1%} of accounts by hash bucket), "
+    n_canary_accounts = test_df.loc[is_canary, "account_id"].nunique()
+    n_total_accounts = test_df["account_id"].nunique()
+    print(f"canary slice: {is_canary.sum():,} rows from {n_canary_accounts:,}/{n_total_accounts:,} accounts "
+          f"({n_canary_accounts / n_total_accounts:.1%} of accounts by hash bucket), "
           f"production slice: {(~is_canary).sum():,} rows")
 
     canary_score, canary_pred = _score(candidate_model, X_test[is_canary], candidate_threshold)
