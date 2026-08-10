@@ -1,15 +1,15 @@
 # Fraud Detection Pipeline
 
-**Status: feature-complete — Sessions 0–11 in progress.** Full pipeline
-built and live-verified end to end: dataset generation, Kafka ingestion,
-Feast/Redis feature store, Airflow orchestration, local + SageMaker model
-training, MLflow staged registry, Triton/FastAPI serving,
-Prometheus/Grafana/Evidently monitoring, and a Docker Compose stack +
-Kubernetes manifests + narrow Terraform module. Real, measured numbers are
-below — no placeholders. One open item, stated plainly rather than buried:
+**Status: feature-complete.** Full pipeline built and live-verified end to
+end: dataset generation, Kafka ingestion, Feast/Redis feature store, Airflow
+orchestration, local + SageMaker model training, MLflow staged registry,
+Triton/FastAPI serving, Prometheus/Grafana/Evidently monitoring, and a Docker
+Compose stack + Kubernetes manifests + narrow Terraform module. Built with AI
+assistance (Claude) end to end. Real, measured numbers are below — no
+placeholders. One open item, stated plainly rather than buried:
 serving latency misses the p99 < 50ms target under load (see
 [Metrics](#metrics)); root cause is identified, fix is scoped for a future
-session.
+update.
 
 An end-to-end, portfolio-grade fraud detection system: streaming ingestion, a
 feature store, orchestrated training, cloud-based training (SageMaker), a
@@ -17,7 +17,6 @@ model registry, real-time serving, monitoring/drift detection, and
 containerized deployment.
 
 Full requirements and rationale: [`PROJECT.md`](PROJECT.md).
-Session-by-session build plan and logs: [`SESSIONS.md`](SESSIONS.md).
 
 This is a synthetic dataset and system built for demonstration purposes —
 it does not use or represent real financial data.
@@ -78,10 +77,10 @@ Forest, Isolation Forest (unsupervised), and an LSTM (sequence-based).
 
 ## Quickstart
 
-`docker-compose.yml` is now finalized (Session 10): a single command brings
-up the entire stack (Kafka, Redis, Postgres, Airflow, MLflow, Triton, the
-FastAPI gateway, Prometheus, Grafana), wired with `depends_on` +
-healthchecks so services start in the correct order automatically.
+`docker-compose.yml` brings up the entire stack (Kafka, Redis, Postgres,
+Airflow, MLflow, Triton, the FastAPI gateway, Prometheus, Grafana), wired
+with `depends_on` + healthchecks so services start in the correct order
+automatically.
 
 Copy `.env.example` to `.env` first (fill in a generated Fernet key and
 webserver secret key for Airflow -- see the comments in that file), then:
@@ -90,13 +89,12 @@ webserver secret key for Airflow -- see the comments in that file), then:
 docker compose up -d
 ```
 
-This assumes the dataset/model artifacts from earlier sessions already
-exist on disk (`data/raw/*.parquet`, `feature_store/feature_repo/registry.db`,
+This assumes the dataset/model artifacts already exist on disk
+(`data/raw/*.parquet`, `feature_store/feature_repo/registry.db`,
 `serving/model_metadata.json`, `serving/triton_model_repo/fraud_rf/1/model.onnx`)
 -- see `docs/dataset.md`, `docs/feature_store.md`, and `docs/serving.md` for
 how to (re)generate each from scratch on a truly clean checkout; these are
-gitignored on purpose (large, regenerable, session-specific) rather than
-committed.
+gitignored on purpose (large and regenerable) rather than committed.
 
 Once healthy:
 
@@ -120,7 +118,7 @@ strategy, and error-handling behavior; [`docs/feature_store.md`](docs/feature_st
 for how the Feast/Redis feature store keeps training and serving consistent;
 [`docs/orchestration.md`](docs/orchestration.md) for the Airflow DAG;
 [`docs/serving.md`](docs/serving.md) for the gateway and load-test results;
-and [`docs/deployment.md`](docs/deployment.md) for the Session 10
+and [`docs/deployment.md`](docs/deployment.md) for the
 Docker Compose / Kubernetes / Terraform writeup, including
 [`k8s/README.md`](k8s/README.md) and [`infra/terraform/README.md`](infra/terraform/README.md).
 
@@ -153,7 +151,7 @@ Accuracy is never reported — at a 0.2% fraud rate it's meaningless.
 | LSTM (sequence-based) | 0.641 | **88.1%** | 9.3% | 0.168 |
 
 **Random Forest is the production model** — highest AUC-PR, currently
-served via Triton (Session 7 registry promotion). LSTM edges it out on
+served via Triton. LSTM edges it out on
 recall (88.1% vs 86.3%) and was trained on a 10,000-account subsample
 rather than the full 5M rows for local-GPU-time reasons; a full-scale
 SageMaker retrain is scoped but deliberately deferred, not dropped (see
@@ -214,7 +212,7 @@ aspiration:
    not each account's true history, which both inflates the baseline
    drift number *and* corrupts the online Feast store on every DAG run.
    This is a real correctness bug, not just a demo artifact, and would be
-   the first thing fixed in a follow-up session.
+   the first thing fixed next.
 2. **Close the serving-latency gap** — bypass Feast's Python client on the
    `/predict` hot path and read the same Redis keys directly (format
    already documented in `feature_store/online_features.py`); re-measure
@@ -238,8 +236,8 @@ The one paid piece (AWS SageMaker training) stayed inside PROJECT.md's
 guardrails: no endpoint was ever left running, training used free-tier-eligible
 instance types, and a final audit (2026-08-10) across `us-east-1`,
 `us-west-2`, `ap-southeast-2` confirmed zero SageMaker endpoints, notebook
-instances, or in-progress training jobs anywhere. The one S3 bucket from
-Session 6 (~326MB: training data + one training job's source bundle) has a
+instances, or in-progress training jobs anywhere. The one S3 bucket
+(~326MB: training data + one training job's source bundle) has a
 14-day expiration lifecycle rule on the training-data prefix. Everything
 else (Kafka, Feast, Redis, Airflow, MLflow, Triton, Prometheus, Grafana,
 Docker, Kubernetes) runs entirely self-hosted at zero cost.
