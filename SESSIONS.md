@@ -311,7 +311,7 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Tasks:**
 - [x] Replace every placeholder metric in the README with the real, measured numbers from Sessions 5, 6, 8, and 9.
 - [x] Add the architecture diagram (from PROJECT.md) to the README.
-- [ ] Record a short demo (screen recording or GIF): a transaction flowing through the system, the Grafana dashboard updating, and a drift alert firing.
+- [x] ~~Record a short demo (screen recording or GIF)~~ — deferred, not needed for now (user decision, 2026-08-10); the stack was verified live and ready to record whenever it's wanted.
 - [x] Write a "what I'd do with more time" section — this reads as maturity, not incompleteness.
 - [x] Finalize resume bullets using the real numbers.
 - [ ] Update the master YAML resume — outside this repo's visibility; do manually.

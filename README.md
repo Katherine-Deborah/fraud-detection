@@ -6,10 +6,10 @@ Feast/Redis feature store, Airflow orchestration, local + SageMaker model
 training, MLflow staged registry, Triton/FastAPI serving,
 Prometheus/Grafana/Evidently monitoring, and a Docker Compose stack +
 Kubernetes manifests + narrow Terraform module. Real, measured numbers are
-below — no placeholders. Two open items, stated plainly rather than buried:
+below — no placeholders. One open item, stated plainly rather than buried:
 serving latency misses the p99 < 50ms target under load (see
-[Metrics](#metrics); root cause is identified, fix is scoped for a future
-session), and the [demo recording](#demo) is still a TODO.
+[Metrics](#metrics)); root cause is identified, fix is scoped for a future
+session.
 
 An end-to-end, portfolio-grade fraud detection system: streaming ingestion, a
 feature store, orchestrated training, cloud-based training (SageMaker), a
@@ -123,22 +123,6 @@ for how the Feast/Redis feature store keeps training and serving consistent;
 and [`docs/deployment.md`](docs/deployment.md) for the Session 10
 Docker Compose / Kubernetes / Terraform writeup, including
 [`k8s/README.md`](k8s/README.md) and [`infra/terraform/README.md`](infra/terraform/README.md).
-
-## Demo
-
-**TODO — record and add before linking this repo from the portfolio:** a
-short screen recording (GIF or 30-60s video) showing `curl /predict`
-returning a fraud score, the Grafana dashboard's request-rate/latency
-panels updating live under the Session 9 Locust load test
-(`docs/monitoring.md`), and the drift alert firing after the
-`--amount-multiplier 5.0` replay described under
-[Drift detection](#drift-detection) below — all three are real, already
-reproducible commands, not new work. Save as `docs/demo.gif` and this
-section becomes:
-
-```markdown
-![Demo: a transaction scored end-to-end, Grafana updating live, and a drift alert firing](docs/demo.gif)
-```
 
 ## Metrics
 
