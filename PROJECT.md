@@ -113,11 +113,14 @@ Four models are trained and compared: **Logistic Regression** (baseline), **Rand
 - A short demo (screen recording or GIF) showing a transaction flowing through the system and the Grafana dashboard updating live.
 - Finalized resume bullets (see below), inserted into the master YAML resume.
 
-**Draft resume bullets** (update with real numbers once measured):
-- Built end-to-end fraud detection system processing streaming transactions via Kafka into a Feast/Redis feature store, training and comparing 4 models (LSTM, Isolation Forest, Random Forest, Logistic Regression) on 5M+ synthetic transactions
-- Trained models locally and via AWS SageMaker training jobs, with MLflow-managed experiment tracking and a staged model registry (shadow → canary → production)
-- Deployed models via Triton Inference Server behind a FastAPI gateway (p99 latency <50ms at 500 TPS), with Airflow-orchestrated retraining and Prometheus/Grafana/Evidently-based monitoring and drift detection
-- Containerized the full stack with Docker Compose and Kubernetes manifests, with a Terraform module scoping the cloud training infrastructure
+**Resume bullets (finalized 2026-08-10, real measured numbers):**
+- Built an end-to-end fraud detection system processing streaming transactions via Kafka into a Feast/Redis feature store, training and comparing 4 models (LSTM, Isolation Forest, Random Forest, Logistic Regression) on 5M+ synthetic transactions with a 0.2% fraud rate; Random Forest reached 0.655 AUC-PR and 86.3% recall in production, LSTM reached 88.1% recall
+- Trained models locally and via an AWS SageMaker training job, with MLflow-managed experiment tracking and a staged model registry (staging → shadow → canary → production)
+- Deployed models via Triton Inference Server behind a FastAPI gateway pulling live features from a Feast/Redis online store; load-tested with Locust (0 failures across 5-100 concurrent users), root-caused a Feast-client concurrency bottleneck via isolated component benchmarks, and built Airflow-orchestrated retraining with Prometheus/Grafana monitoring and an Evidently drift detector that caught a live-injected 5x transaction-amount shift (48.3% → 51.7% drifted columns)
+- Containerized the full stack with Docker Compose (8 services, health-check-ordered) and Kubernetes manifests (tested on a local `kind` cluster), with a Terraform module scoping the SageMaker+S3 training infrastructure separately from the always-on stack
+
+_(Insert into the master YAML resume manually — this repo doesn't have
+visibility into where that file lives.)_
 
 ## 9. Explicitly out of scope
 

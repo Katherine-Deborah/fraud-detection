@@ -309,16 +309,21 @@ This file is the source of truth for multi-session work on this project. Read `P
 **Prerequisites:** Sessions 0–10 complete.
 
 **Tasks:**
-- [ ] Replace every placeholder metric in the README with the real, measured numbers from Sessions 5, 6, 8, and 9.
-- [ ] Add the architecture diagram (from PROJECT.md) to the README.
+- [x] Replace every placeholder metric in the README with the real, measured numbers from Sessions 5, 6, 8, and 9.
+- [x] Add the architecture diagram (from PROJECT.md) to the README.
 - [ ] Record a short demo (screen recording or GIF): a transaction flowing through the system, the Grafana dashboard updating, and a drift alert firing.
-- [ ] Write a "what I'd do with more time" section — this reads as maturity, not incompleteness.
-- [ ] Finalize resume bullets using the real numbers and update the master YAML resume.
-- [ ] Do a final pass confirming no AWS resources are left running anywhere (`aws sagemaker list-endpoints`, `list-notebook-instances`, S3 bucket check).
+- [x] Write a "what I'd do with more time" section — this reads as maturity, not incompleteness.
+- [x] Finalize resume bullets using the real numbers.
+- [ ] Update the master YAML resume — outside this repo's visibility; do manually.
+- [x] Do a final pass confirming no AWS resources are left running anywhere (`aws sagemaker list-endpoints`, `list-notebook-instances`, S3 bucket check).
 
 **Definition of done:** The repo, README, and demo are ready to link from the portfolio site and resume, with no placeholder numbers remaining anywhere.
 
 **Cost/safety check:** Final full AWS resource audit — confirm zero ongoing spend.
 
 **Session log:**
-- _(fill in after running this session)_
+- 2026-08-10: README rewritten with real numbers pulled from the existing session docs (`docs/dataset.md`, `docs/model_comparison.md`, `docs/serving.md`, `docs/monitoring.md`) rather than re-measuring anything — the numbers already existed, they just weren't surfaced at the top level. Replaced the ASCII architecture diagram with a Mermaid flowchart (renders natively on GitHub) covering the full producer→consumer→feature-store→orchestration→training→registry→serving→monitoring path. Metrics section reports the Session 8 serving-latency miss (p99 far above the 50ms target) and the sub-90%-recall gap honestly rather than rounding up, consistent with this project's existing convention of reporting real numbers even when they miss the target. "What I'd do with more time" consolidated from the five separate "What I'd try" lists already scattered across `docs/model_comparison.md`, `docs/serving.md`, and `docs/monitoring.md`, ranked by the monitoring doc's own stated priority (the feature-engineering history bug first, since it's a correctness issue, not just cosmetic). Resume bullets in `PROJECT.md` finalized with real numbers; inserting into the actual master YAML resume is a manual step outside this repo. Demo GIF **not** recorded this session (needs a real screen recording of the user's browser/terminal, which this session couldn't produce) — left as an explicit TODO in the README with the exact three things to capture, all already-reproducible commands from Sessions 8/9, not new work.
+
+  **AWS audit (read-only, live):** `aws sagemaker list-endpoints` / `list-notebook-instances` / `list-training-jobs --status-equals InProgress` across `us-east-1`, `us-west-2`, `ap-southeast-2` — all empty in all three regions. `aws s3api list-buckets` was denied (the `fraud-detection-cli` IAM user is deliberately scoped without `s3:ListAllMyBuckets`, consistent with this project's least-privilege intent, not a bug); checked the known Session 6 bucket (`fraud-detection-sagemaker-183079729790`) directly instead — 8 objects, ~326MB, `training-data/` prefix has a 14-day expiration lifecycle rule (unchanged from Session 6; the wider bucket-level rule Session 10's Terraform module defines was never applied, per that session's own log). Zero ongoing SageMaker spend confirmed.
+
+  One commit from Session 10 was still unpushed to `origin/master` going into this session — flagged for the user, not pushed automatically.
